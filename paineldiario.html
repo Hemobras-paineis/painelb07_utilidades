@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Controle de Dados</title>
+    <!-- Bootstrap para o Visual moderno -->
+    <link href="https://jsdelivr.net" rel="stylesheet">
+    <!-- Chart.js para os Gráficos -->
+    <script src="https://jsdelivr.net"></script>
+</head>
+<body class="bg-light">
+
+    <div class="container my-5">
+        <h2 class="mb-4 text-center">Dashboard Online (Drive)</h2>
+        
+        <!-- Cards de Resumo -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card text-white bg-primary mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">Total de Registros</h5>
+                        <p class="card-text fs-3" id="totalRegistros">Carregando...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Área do Gráfico -->
+        <div class="card mb-4">
+            <div class="card-header fw-bold">Análise Visual dos Dados</div>
+            <div class="card-body">
+                <canvas id="meuGrafico" style="max-height: 300px;"></canvas>
+            </div>
+        </div>
+
+        <!-- Tabela de Dados -->
+        <div class="card">
+            <div class="card-header fw-bold">Dados Consolidados</div>
+            <div class="card-body table-responsive">
+                <table class="table table-striped" id="tabelaDados">
+                    <thead><tr id="cabecalhoTabela"><th>Carregando...</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 🔴 INSIRA A URL QUE VOCÊ COPIOU DO GOOGLE APPS SCRIPT AQUI
+        const URL_API = "https://script.google.com/macros/s/AKfycbzZcQ79djFR-ccfU-jDmahnj2_SzwGpwLjPTi6onErjHz2qyWgJGeHArVZA9SBQHkqv/exec";
+
+        async function carregarDados() {
+            try {
+                const resposta = await fetch(URL_API);
+                const dados = await reply.json();
+                
+                if (!dados || dados.length === 0) return;
+
+                // 1. Atualiza Contador
+                document.getElementById('totalRegistros').innerText = dados.length - 1;
+
+                // 2. Monta a Tabela Dinamicamente
+                const cabecalho = dados[0];
+                const linhas = dados.slice(1);
+                
+                let htmlCabecalho = "";
+                cabecalho.forEach(col => htmlCabecalho += `<th>${col}</th>`);
+                document.getElementById('cabecalhoTabela').innerHTML = htmlCabecalho;
+
+                let htmlCorpo = "";
+                linhas.forEach(linha => {
+                    htmlCorpo += "<tr>";
+                    linha.forEach(celula => htmlCorpo += `<td>${celula}</td>`);
+                    htmlCorpo += "</tr>";
+                });
+                document.getElementById('tabelaDados').querySelector('tbody').innerHTML = htmlCorpo;
+
+                // 3. Monta Gráfico de Exemplo (Usa a primeira coluna como Label e a segunda como Valor)
+                const labelsGrafico = linhas.map(l => l[0]); 
+                const valoresGrafico = linhas.map(l => Number(l[1]) || 0); 
+
+                new Chart(document.getElementById('meuGrafico'), {
+                    type: 'bar',
+                    data: {
+                        labels: labelsGrafico,
+                        datasets: [{
+                            label: cabecalho[1] || 'Valores',
+                            data: valoresGrafico,
+                            backgroundColor: 'rgba(54, 162, 235, 0.6)'
+                        }]
+                    }
+                });
+
+            } catch (erro) {
+                console.error("Erro ao buscar dados:", erro);
+                alert("Erro ao carregar dados do Drive.");
+            }
+        }
+
+        carregarDados();
+    </script>
+</body>
+</html>
