@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Controle de Utilidades - Hemobrás</title>
+    <link rel="stylesheet" href="style.css?v=painel-atualizado">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+    </script>
+</head>
+<body>
+    <!-- Barra de Progresso do Modo TV -->
+    <div id="tvProgressBar" class="tv-progress"></div>
+
+    <div class="app-container">
+        <!-- Menu Lateral -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <img src="logo_hemo.jpeg" alt="Logo Hemobrás" class="sidebar-logo">
+                <h2>Hemobrás</h2>
+                <p>Gestão de Utilidades</p>
+            </div>
+            <nav class="sidebar-nav">
+                <ul>
+                    <li class="active"><a href="#" data-target="view-dashboard"><i class="fas fa-chart-line"></i> Dashboard Geral</a></li>
+                    <li class="menu-title">Módulos da Planilha</li>
+                    <li><a href="#" data-target="view-disponibilidade"><i class="fas fa-calendar-check"></i> Disponibilidade</a></li>
+                    <li><a href="#" data-target="view-dw"><i class="fas fa-tint"></i> DW</a></li>
+                    <li><a href="#" data-target="view-nitrogenio"><i class="fas fa-flask"></i> Nitrogênio</a></li>
+                    <li><a href="#" data-target="view-indisponibilidade"><i class="fas fa-exclamation-triangle"></i> Indisponibilidade</a></li>
+                    <li><a href="#" data-target="view-cloro"><i class="fas fa-vial"></i> Teste de Cloro</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Conteúdo Principal -->
+        <main class="main-content" id="mainContent">
+            
+            <!-- Barra Superior Principal -->
+            <header class="top-bar">
+                <div class="top-bar-left">
+                    <div class="page-title">
+                        <h1 id="pageTitle">Visão Geral da Operação</h1>
+                    </div>
+                    <div id="liveClock" class="live-clock"><i class="far fa-clock"></i> Carregando...</div>
+                </div>
+                
+                <div class="header-actions">
+                    <button id="btnGeneratePdf" class="btn-action btn-report" title="Gerar relatório em PDF"><i class="fas fa-file-pdf"></i> Gerar PDF</button>
+                    <button id="btnFullscreen" class="btn-action" title="Expandir para Tela Cheia"><i class="fas fa-expand"></i> Tela Cheia</button>
+                    <button id="btnTvMode" class="btn-action btn-tv" title="Iniciar Modo TV"><i class="fas fa-tv"></i> Iniciar Modo TV</button>
+                </div>
+            </header>
+
+            <!-- Barra Secundária de Filtros (Fica oculta no Modo TV) -->
+            <div class="filters-bar tv-hide" id="filtersBar">
+                <div class="filter-group">
+                    <label for="dateStart">De:</label>
+                    <input type="date" id="dateStart" value="2026-08-01">
+                </div>
+                <div class="filter-group">
+                    <label for="dateEnd">Até:</label>
+                    <input type="date" id="dateEnd" value="2026-08-31">
+                </div>
+                <div class="filter-group">
+                    <label for="blocoFilter">Bloco:</label>
+                    <select id="blocoFilter">
+                        <option value="all">Todos os Blocos</option>
+                        <option value="7A">Bloco 7A</option>
+                        <option value="7B">Bloco 7B</option>
+                    </select>
+                </div>
+                <button class="btn-filter"><i class="fas fa-filter"></i> Aplicar</button>
+                <button id="reloadCsvData" class="btn-filter btn-reload"><i class="fas fa-file-csv"></i> Recarregar CSV</button>
+                <div id="dataSourceStatus" class="data-source-status" role="status" aria-live="polite">
+                    <span class="source-dot"></span>
+                    <span>Fonte: carregando...</span>
+                </div>
+            </div>
+
+            <section class="data-editor-panel tv-hide" id="dataEditorPanel">
+                <div class="data-editor-header">
+                    <h3><i class="fas fa-table"></i> Base de dados</h3>
+                    <button id="applyDataChanges" class="btn-filter"><i class="fas fa-sync-alt"></i> Atualizar painel</button>
+                </div>
+                <div class="table-responsive data-editor-wrap">
+                    <table class="editor-table">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>DW 7A (m³)</th>
+                                <th>DW 7B (m³)</th>
+                                <th>Nitrogênio (pol)</th>
+                                <th>Cloro (ppm)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="baseDataTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- ================= VIEW: DASHBOARD GERAL ================= -->
+            <div id="view-dashboard" class="view-section active">
+                
+                <!-- KPIs do Mês -->
+                <section class="kpi-container tv-hide">
+                    <div class="kpi-card success">
+                        <div class="kpi-icon"><i class="fas fa-gas-pump"></i></div>
+                        <div class="kpi-data">
+                            <h3>Reabastecimento de Nitrogênio</h3>
+                            <h2 id="kpiIndisponibilidade">--</h2>
+                            <p id="kpiIndisponibilidadeLabel">--</p>
+                        </div>
+                    </div>
+                    <div class="kpi-card danger">
+                        <div class="kpi-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                        <div class="kpi-data">
+                            <h3>Parada de Utilidade</h3>
+                            <h2 id="kpiDowntime">--</h2>
+                            <p id="kpiDowntimeLabel">--</p>
+                            <p id="kpiDowntimeComment">--</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- NOVO: Resumo do Dia Atual -->
+                <section class="daily-summary-container tv-hide">
+                    <div class="daily-summary-header">
+                        <h2><i class="fas fa-calendar-day"></i> Informações do Dia Atual (Hoje)</h2>
+                        <span id="dailyDateBadge" class="badge">Carregando...</span>
+                    </div>
+                    <div class="daily-cards">
+                        <div class="daily-card">
+                            <i class="fas fa-flask"></i>
+                            <div>
+                                <h4>Nitrogênio</h4>
+                                <strong id="dailyNitro">--</strong>
+                            </div>
+                        </div>
+                        <div class="daily-card">
+                            <i class="fas fa-tint"></i>
+                            <div>
+                                <h4>Consumo DW 7A</h4>
+                                <strong id="dailyDw7a">--</strong>
+                            </div>
+                        </div>
+                        <div class="daily-card">
+                            <i class="fas fa-tint" style="color: #27ae60;"></i>
+                            <div>
+                                <h4>Consumo DW 7B</h4>
+                                <strong id="dailyDw7b">--</strong>
+                            </div>
+                        </div>
+                        <div class="daily-card">
+                            <i class="fas fa-vial"></i>
+                            <div>
+                                <h4>Teste de Cloro</h4>
+                                <strong id="dailyCloro">--</strong>
+                            </div>
+                        </div>
+                        <div class="daily-card">
+                            <i class="fas fa-percent"></i>
+                            <div>
+                                <h4>Disponibilidade das Utilidades no Mês Atual</h4>
+                                <strong id="avgAvailability" style="color: #2ecc71;">--</strong>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Gráficos Menores -->
+                <section class="dashboard">
+                    <div class="chart-card">
+                        <h3>Consumo DW (7A vs 7B)</h3>
+                        <div class="chart-wrapper small-chart">
+                            <canvas id="dwChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Nível de Nitrogênio</h3>
+                        <div class="chart-wrapper small-chart">
+                            <canvas id="nitrogenChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Monitoramento de Cloro</h3>
+                        <div class="chart-wrapper small-chart">
+                            <canvas id="chlorineChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- ================= VIEW: DISPONIBILIDADE ================= -->
+            <div id="view-disponibilidade" class="view-section">
+                <div class="module-container">
+                    <div class="chart-card tv-chart">
+                        <h3>Disponibilidade das Utilidades</h3>
+                        <div class="availability-panel">
+                            <div class="availability-summary">
+                                <span id="availabilitySummary" class="availability-total">0/0 disponíveis</span>
+                            </div>
+                            <div id="availabilityTableBody" class="availability-list"></div>
+                        </div>
+                    </div>
+                    <section class="reference-section tv-hide">
+                        <div class="table-card">
+                            <div class="table-header-custom"><i class="fas fa-comment-alt"></i> <h3>Ocorrências das Utilidades</h3></div>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead><tr><th>Data</th><th>Utilidade</th><th>Comentário</th></tr></thead>
+                                    <tbody id="availabilityCommentsTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- ================= VIEW: DW ================= -->
+            <div id="view-dw" class="view-section">
+                <div class="module-container">
+                    <div class="chart-card tv-chart">
+                        <h3>Consumo Diário de DW (7A vs 7B) - m³</h3>
+                        <div class="chart-wrapper"><canvas id="dwChartTv"></canvas></div>
+                    </div>
+                    <section class="reference-section tv-hide">
+                        <div class="table-card">
+                            <div class="table-header-custom"><i class="fas fa-tint"></i> <h3>Tabela DW</h3></div>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead><tr><th>Data</th><th>Consumo DW 7A (m³)</th><th>Consumo DW 7B (m³)</th></tr></thead>
+                                    <tbody id="dwTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- ================= VIEW: NITROGÊNIO ================= -->
+            <div id="view-nitrogenio" class="view-section">
+                <div class="module-container">
+                    <div class="chart-card tv-chart">
+                        <h3>Acompanhamento de Nível de Nitrogênio</h3>
+                        <div class="chart-wrapper"><canvas id="nitrogenChartTv"></canvas></div>
+                    </div>
+                    <section class="reference-section nitrogenio-tv-table">
+                        <div class="table-card">
+                            <div class="table-header-custom nitrogen-header"><i class="fas fa-flask"></i> <h3>NITROGÊNIO</h3></div>
+                            <div class="table-responsive">
+                                <table class="nitrogen-table">
+                                    <thead><tr><th>DATA <i class="fas fa-chevron-down"></i></th><th>Nível de Nitrogênio <i class="fas fa-chevron-down"></i></th><th>Reabastecimento (pol) <i class="fas fa-chevron-down"></i></th></tr></thead>
+                                    <tbody id="nitroTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- ================= VIEW: INDISPONIBILIDADE ================= -->
+            <div id="view-indisponibilidade" class="view-section">
+                <div class="module-container">
+                    <div class="chart-card tv-chart">
+                        <h3>Indisponibilidade por Utilidade (Horas)</h3>
+                        <div class="chart-wrapper"><canvas id="indispChart"></canvas></div>
+                    </div>
+                    <section class="reference-section indisponibilidade-tv-table">
+                        <div class="table-card">
+                            <div class="table-header-custom"><i class="fas fa-comment-alt"></i> <h3>Ocorrências das Utilidades</h3></div>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead><tr><th>Data</th><th>Utilidade</th><th>Comentário</th></tr></thead>
+                                    <tbody id="logTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- ================= VIEW: TESTE DE CLORO ================= -->
+            <div id="view-cloro" class="view-section">
+                <div class="module-container">
+                    <div class="chart-card tv-chart">
+                        <h3>Monitoramento de Cloro (ppm) vs Limites de Controle</h3>
+                        <div class="chart-wrapper"><canvas id="chlorineChartTv"></canvas></div>
+                    </div>
+                    <section class="reference-section tv-hide">
+                        <div class="table-card">
+                            <div class="table-header-custom"><i class="fas fa-vial"></i> <h3>Relatório Cloro</h3></div>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead><tr><th>Data</th><th>Lim. Inf.</th><th>Teste (ppm)</th><th>Lim. Sup.</th><th>Reteste</th><th>Obs.</th></tr></thead>
+                                    <tbody id="cloroTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="script.js?v=google-sheets-principal"></script>
+</body>
+</html>
