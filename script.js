@@ -1,4 +1,5 @@
 const DEFAULT_YEAR = 2026;
+const AUTO_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 // Register ChartJS Datalabels plugin
 if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
@@ -104,7 +105,13 @@ function parseCsvText(csvText) {
     const lines = csvText.trim().split(/\r?\n/).filter(line => line.trim());
     if (!lines.length) return [];
 
-    const headers = splitCsvLine(lines[0]).map(cell => normalizeCsvHeader(cell));
+const headerCounts = new Map();
+const headers = splitCsvLine(lines[0]).map((cell) => {
+    const header = normalizeCsvHeader(cell);
+    const count = (headerCounts.get(header) || 0) + 1;
+    headerCounts.set(header, count);
+    return count === 1 ? header : `${header}${count}`;
+});
     return lines.slice(1).map((line) => {
         const values = splitCsvLine(line);
         const row = {};
@@ -240,6 +247,38 @@ function buildDataStateFromCsv(csvText) {
     return { diasAgosto, dw7A, dw7B, nitrogenNivel, cloroPpm, retestePpm, nitroData };
 }
 
+function buildDowntimeStateFromCsv(csvText) {
+    const lines = String(csvText || '').trim().split(/\r?\n/).filter(line => line.trim());
+    if (lines.length < 2) return [];
+
+    const headers = splitCsvLine(lines[0]).map(cell => normalizeCsvHeader(cell));
+    const dateIndex = headers.findIndex((header, index) => header === 'data' && index > 0);
+    const utilityIndex = headers.indexOf('utilidade');
+    const stopsIndex = headers.indexOf('paradas');
+    const hoursIndex = headers.findIndex(header => header.includes('tempoindisponivel'));
+    const commentIndex = headers.findIndex(header => header.includes('comentario'));
+
+    if ([dateIndex, utilityIndex, stopsIndex, hoursIndex, commentIndex].some(index => index < 0)) {
+        return [];
+    }
+
+    return lines.slice(1).map((line) => {
+        const values = splitCsvLine(line);
+        const utility = values[utilityIndex]?.trim();
+        const hours = formatHoursValue(values[hoursIndex]);
+
+        if (!utility || hours === '0h') return null;
+
+        return {
+            d: values[dateIndex]?.trim() || 'N/D',
+            u: utility,
+            p: values[stopsIndex]?.trim() || '0',
+            h: hours,
+            m: values[commentIndex]?.trim() || 'Sem detalhe'
+        };
+    }).filter(Boolean);
+}
+
 const GOOGLE_SHEETS_CSV_URL = 'https://docs.google.com/spreadsheets/d/1SmjrouY2fg_kFRSYsu6kiptQpHJ2hbIIJR9zHWP1x9Q/export?format=csv&gid=0';
 const DATA_SOURCE_URL = GOOGLE_SHEETS_CSV_URL;
 const DATA_SOURCE_CANDIDATES = [DATA_SOURCE_URL];
@@ -330,8 +369,8 @@ if (typeof document !== 'undefined') {
     let currentViewIndex = 0;
     // Views que contém os gráficos
     const tvViews = [
-        { id: 'view-disponibilidade', title: 'Disponibilidade' },
-        { id: 'view-indisponibilidade', title: 'Indisponibilidade' },
+{ id: 'view-disponibilidade', title: 'Disponibilidade Diária' },
+        { id: 'view-indisponibilidade', title: 'Indisponibilidade das Utilidades' },
         { id: 'view-nitrogenio', title: 'Nitrogênio' },
         { id: 'view-dw', title: 'DW' },
         { id: 'view-cloro', title: 'Teste de Cloro' }
@@ -427,13 +466,13 @@ if (typeof document !== 'undefined') {
         { name: 'SFI 7B', status: 'indisponivel' }
     ];
     const logData = [ { data: '05/08/2026', utilidade: 'CW Processo 7B / WFI 7B / SFI 7B', comentario: 'Vazamento na linha de retorno da torre 7B.' }, { data: '12/08/2026', utilidade: 'SFI 7A / CW Processo 7A', comentario: 'Alarmes de temperaturas altas.' } ];
+let availabilityReferenceDate = '';
 
-    function syncAvailabilityForCurrentDate() {
-        const today = new Date();
-        const referenceDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+function syncAvailabilityForDate(referenceDate) {
+    availabilityReferenceDate = normalizeDateValue(referenceDate);
         const unavailableUtilities = new Set(
             downtimeData
-                .filter((item) => normalizeDateValue(item.d) === normalizeDateValue(referenceDate))
+            .filter((item) => normalizeDateValue(item.d) === availabilityReferenceDate)
                 .map((item) => normalizeCsvHeader(item.u))
         );
 
@@ -441,7 +480,7 @@ if (typeof document !== 'undefined') {
             item.status = unavailableUtilities.has(normalizeCsvHeader(item.name)) ? 'indisponivel' : 'disponivel';
         });
 
-        return referenceDate;
+        return availabilityReferenceDate;
     }
 
     function renderAvailabilityView() {
@@ -451,8 +490,9 @@ if (typeof document !== 'undefined') {
 
         const availableCount = availabilityData.filter(item => item.status === 'disponivel').length;
         if (summary) {
-            const referenceDate = `${String(new Date().getDate()).padStart(2, '0')}/${String(new Date().getMonth() + 1).padStart(2, '0')}/${new Date().getFullYear()}`;
-            summary.textContent = `${availableCount}/${availabilityData.length} disponíveis em ${referenceDate}`;
+            const [year, month, day] = availabilityReferenceDate.split('-');
+            const displayDate = year && month && day ? `${day}/${month}/${year}` : 'data selecionada';
+            summary.textContent = `${availableCount}/${availabilityData.length} disponíveis em ${displayDate}`;
         }
 
         tableBody.innerHTML = availabilityData.map((item) => {
@@ -497,11 +537,15 @@ if (typeof document !== 'undefined') {
                 retestePpm = [...parsed.retestePpm];
                 nitroData = [...parsed.nitroData];
 
-                if (url.includes('docs.google.com')) {
-                    await loadPage2DowntimeData();
-                }
+const downtimeFromSource = buildDowntimeStateFromCsv(csvText);
+if (downtimeFromSource.length) {
+downtimeData.length = 0;
+downtimeData.push(...downtimeFromSource);
+downtimeComments.length = 0;
+downtimeComments.push(...downtimeFromSource);
+}
 
-                syncAvailabilityForCurrentDate();
+                syncAvailabilityForDate(document.getElementById('dateEnd')?.value);
                 renderAvailabilityView();
 
                 const sourceLabel = url.includes('docs.google.com') ? 'Google Sheets' : url.includes('painelb07') ? 'CSV local' : 'CSV fallback';
@@ -520,7 +564,7 @@ if (typeof document !== 'undefined') {
         nitrogenNivel = [...defaultData.nitrogenNivel];
         cloroPpm = [...defaultData.cloroPpm];
     retestePpm = [...defaultData.retestePpm];
-                syncAvailabilityForCurrentDate();
+                syncAvailabilityForDate(document.getElementById('dateEnd')?.value);
                 renderAvailabilityView();
         updateDataSourceStatus('Google Sheets indisponível; exibindo dados locais temporariamente');
         populateBaseDataTable();
@@ -588,7 +632,7 @@ if (typeof document !== 'undefined') {
 
                 const normalized = values.map((item) => ({
                     d: item.d || 'N/D',
-                    u: item.u || 'Indisponibilidade',
+                    u: item.u || 'Indisponibilidade das Utilidades',
                     p: item.p || '0',
                     h: item.h || '0h',
                     m: item.m || 'Sem detalhe'
@@ -752,19 +796,23 @@ if (typeof document !== 'undefined') {
 
         const avgAvailability = document.getElementById('avgAvailability');
         if (avgAvailability) {
-            const now = new Date();
-            const currentYear = now.getFullYear();
-            const currentMonth = now.getMonth();
-            const utilitiesInBlock = availabilityData.filter((item) => selectedBlock === 'all' || item.name.endsWith(selectedBlock));
-            const monthlyDowntimeHours = downtimeData
-                .filter((item) => {
-                    const date = new Date(`${normalizeDateValue(item.d)}T00:00:00`);
-                    const matchesBlock = selectedBlock === 'all' || item.u.endsWith(selectedBlock);
-                    return matchesBlock && date.getFullYear() === currentYear && date.getMonth() === currentMonth && date <= now;
-                })
-                .reduce((total, item) => total + parseNumberValue(item.h), 0);
-            const totalMonthlyHours = utilitiesInBlock.length * Math.max(now.getDate(), 1) * 24;
-            const percentage = Math.max(0, ((totalMonthlyHours - monthlyDowntimeHours) / totalMonthlyHours) * 100);
+    const startDate = document.getElementById('dateStart')?.value;
+    const endDate = document.getElementById('dateEnd')?.value;
+    const periodStart = new Date(`${startDate}T00:00:00`);
+    const periodEnd = new Date(`${endDate}T23:59:59`);
+    const utilitiesInBlock = availabilityData.filter((item) => selectedBlock === 'all' || item.name.endsWith(selectedBlock));
+    const downtimeHours = downtimeData
+        .filter((item) => {
+            const date = new Date(`${normalizeDateValue(item.d)}T00:00:00`);
+            const matchesBlock = selectedBlock === 'all' || item.u.endsWith(selectedBlock);
+            return matchesBlock && date >= periodStart && date <= periodEnd;
+        })
+        .reduce((total, item) => total + parseNumberValue(item.h), 0);
+    const periodDays = Math.max(1, Math.ceil((periodEnd - periodStart) / (24 * 60 * 60 * 1000)));
+    const totalPeriodHours = utilitiesInBlock.length * periodDays * 24;
+    const percentage = totalPeriodHours
+        ? Math.max(0, ((totalPeriodHours - downtimeHours) / totalPeriodHours) * 100)
+        : 0;
             const color = percentage >= 80 ? '#2ecc71' : percentage >= 50 ? '#f39c12' : '#e74c3c';
             avgAvailability.textContent = `${percentage.toFixed(1)}%`;
             avgAvailability.style.color = color;
@@ -805,19 +853,19 @@ if (typeof document !== 'undefined') {
 
         const logTbody = document.getElementById('logTableBody');
         if (logTbody) {
-            const comments = [...downtimeComments]
+    const occurrences = [...downtimeData]
                 .sort((a, b) => new Date(normalizeDateValue(a.d)) - new Date(normalizeDateValue(b.d)));
-            logTbody.innerHTML = (comments.length ? comments : [{ d: 'Sem dados', u: '-', m: 'Nenhuma ocorrência registrada.' }])
-                .map((item) => `<tr><td><strong>${item.d}</strong></td><td><span style="color:#2980b9; font-weight:500">${item.u}</span></td><td>${item.m}</td></tr>`)
+    logTbody.innerHTML = (occurrences.length ? occurrences : [{ d: 'Sem dados', u: '-', p: '-', h: '-', m: 'Nenhuma ocorrência registrada.' }])
+        .map((item) => `<tr><td><strong>${item.d}</strong></td><td><span style="color:#2980b9; font-weight:500">${item.u}</span></td><td>${item.p}</td><td>${item.h}</td><td>${item.m}</td></tr>`)
                 .join('');
         }
 
         const availabilityCommentsTbody = document.getElementById('availabilityCommentsTableBody');
         if (availabilityCommentsTbody) {
-            const comments = [...downtimeComments]
+    const occurrences = [...downtimeData]
                 .sort((a, b) => new Date(normalizeDateValue(a.d)) - new Date(normalizeDateValue(b.d)));
-            availabilityCommentsTbody.innerHTML = (comments.length ? comments : [{ d: 'Sem dados', u: '-', m: 'Nenhuma ocorrência registrada.' }])
-                .map((item) => `<tr><td><strong>${item.d}</strong></td><td><span style="color:#2980b9; font-weight:500">${item.u}</span></td><td>${item.m}</td></tr>`)
+    availabilityCommentsTbody.innerHTML = (occurrences.length ? occurrences : [{ d: 'Sem dados', u: '-', p: '-', h: '-', m: 'Nenhuma ocorrência registrada.' }])
+        .map((item) => `<tr><td><strong>${item.d}</strong></td><td><span style="color:#2980b9; font-weight:500">${item.u}</span></td><td>${item.p}</td><td>${item.h}</td><td>${item.m}</td></tr>`)
                 .join('');
         }
     }
@@ -876,6 +924,8 @@ if (typeof document !== 'undefined') {
         const labels = filtered.labels;
         const indexes = filtered.indexes;
         const selectedBlock = blocoFilter ? blocoFilter.value : 'all';
+syncAvailabilityForDate(dateEnd.value);
+renderAvailabilityView();
 
         const blockDw7A = indexes.map((index) => dw7A[index]);
         const blockDw7B = indexes.map((index) => dw7B[index]);
@@ -982,7 +1032,7 @@ if (typeof document !== 'undefined') {
 
     const dispCanvas = document.getElementById('dispChart');
     if (dispCanvas) {
-        const dispChart = new Chart(dispCanvas.getContext('2d'), { type: 'bar', data: { labels: ['Vapor Ind 7A', 'Vapor Ind 7B', 'CW Processo', 'CW HVAC', 'Ar Comp', 'WFI', 'SFI'], datasets: [{ label: 'Disponibilidade (%)', data: [100,100,100,100,100,100,100], backgroundColor: '#2ecc71', borderRadius: 4 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { max: 100 } }, plugins: { datalabels: { color: '#000', font: { weight: 'bold', size: 12 }, formatter: (value) => value + '%' } } } });
+const dispChart = new Chart(dispCanvas.getContext('2d'), { type: 'bar', data: { labels: ['Vapor Ind 7A', 'Vapor Ind 7B', 'CW Processo', 'CW HVAC', 'Ar Comp', 'WFI', 'SFI'], datasets: [{ label: 'Disponibilidade Diária (%)', data: [100,100,100,100,100,100,100], backgroundColor: '#2ecc71', borderRadius: 4 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { max: 100 } }, plugins: { datalabels: { color: '#000', font: { weight: 'bold', size: 12 }, formatter: (value) => value + '%' } } } });
         window.dispChart = dispChart;
     }
 
@@ -1147,8 +1197,32 @@ if (typeof document !== 'undefined') {
                 ].join('');
             }).join('');
 
-            const reportContent = [
-                '<div id="reportPrintArea">',
+const chartImageSpecs = [
+{ chart: window.dwChart, title: 'Consumo de Água (DW 7A / DW 7B)' },
+{ chart: window.nitrogenChart, title: 'Nível de Nitrogênio' },
+{ chart: window.chlorineChart, title: 'Monitoramento de Cloro' },
+{ chart: window.indispChart, title: 'Indisponibilidade das Utilidades (Horas)' }
+];
+const chartsHtml = chartImageSpecs
+.filter((spec) => spec.chart && typeof spec.chart.toBase64Image === 'function')
+.map((spec) => ({ ...spec, image: spec.chart.toBase64Image('image/png', 1) }))
+.filter((spec) => spec.image && spec.image.length > 100)
+.map((spec) => {
+    const image = spec.image;
+    return [
+        '<div class="report-chart-block">',
+        '<h4>' + spec.title + '</h4>',
+        '<img src="' + image + '" alt="' + spec.title + '">',
+        '</div>'
+    ].join('');
+})
+.join('');
+const chartsSectionHtml = chartsHtml
+? '<h3 class="report-section-title">Gráficos do Período</h3><div class="report-charts-grid">' + chartsHtml + '</div>'
+: '';
+
+const reportContent = [
+'<div id="reportPrintArea">',
                 '<header class="report-header"><img src="logo_hemo.jpeg" alt="Hemobrás"><div><span>HEMOBRÁS</span><h1>Relatório de Utilidades</h1><p>Gestão de Utilidades</p></div></header>',
                 '<div class="report-meta"><div><strong>Período</strong><span>' + reportPeriod + '</span></div><div><strong>Bloco</strong><span>' + (bloco === 'all' ? 'Todos os blocos' : 'Bloco ' + bloco) + '</span></div></div>',
                 '<h3 class="report-section-title">Resumo Operacional</h3>',
@@ -1156,11 +1230,12 @@ if (typeof document !== 'undefined') {
                 '<div><span>Maior consumo DW</span><strong>' + maxDw.toFixed(1) + ' m³</strong></div>',
                 '<div><span>Maior nitrogênio</span><strong>' + maxNitro.toFixed(1) + ' pol</strong></div>',
                 '<div><span>Média de cloro</span><strong>' + avgCloro.toFixed(2) + ' ppm</strong></div>',
-                '<div><span>Disponibilidade mensal</span><strong>' + availabilityValue + '</strong></div>',
+                '<div><span>Disponibilidade diária</span><strong>' + availabilityValue + '</strong></div>',
                 '<div><span>Último reabastecimento</span><strong>' + (latestRefill ? latestRefill.r + ' pol em ' + latestRefill.d : 'Nenhum no período') + '</strong></div>',
                 '<div><span>Última parada</span><strong>' + (latestDowntime ? latestDowntime.u + ' - ' + latestDowntime.h + ' em ' + latestDowntime.d : 'Nenhuma no período') + '</strong></div>',
                 '<div><span>Paradas registradas</span><strong>' + downtimeInRange.length + '</strong></div>',
                 '</div>',
+                chartsSectionHtml,
                 '<h3 class="report-section-title">Paradas e Ocorrências</h3>',
                 '<table class="report-table">',
                 '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Utilidade</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Paradas</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Tempo indisponível</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Comentário</th></tr></thead>',
@@ -1191,6 +1266,9 @@ if (typeof document !== 'undefined') {
     if (blocoFilter) blocoFilter.addEventListener('change', applyDateFilters);
 
     loadDataFromCsv();
+setInterval(() => {
+    loadDataFromCsv();
+}, AUTO_REFRESH_INTERVAL_MS);
 }
 
 if (typeof module !== 'undefined') {

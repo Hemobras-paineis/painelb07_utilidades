@@ -27,10 +27,10 @@
                 <ul>
                     <li class="active"><a href="#" data-target="view-dashboard"><i class="fas fa-chart-line"></i> Dashboard Geral</a></li>
                     <li class="menu-title">Módulos da Planilha</li>
-                    <li><a href="#" data-target="view-disponibilidade"><i class="fas fa-calendar-check"></i> Disponibilidade</a></li>
+                    <li><a href="#" data-target="view-disponibilidade"><i class="fas fa-calendar-check"></i> Disponibilidade Diária</a></li>
                     <li><a href="#" data-target="view-dw"><i class="fas fa-tint"></i> DW</a></li>
                     <li><a href="#" data-target="view-nitrogenio"><i class="fas fa-flask"></i> Nitrogênio</a></li>
-                    <li><a href="#" data-target="view-indisponibilidade"><i class="fas fa-exclamation-triangle"></i> Indisponibilidade</a></li>
+                    <li><a href="#" data-target="view-indisponibilidade"><i class="fas fa-exclamation-triangle"></i> Indisponibilidade das Utilidades</a></li>
                     <li><a href="#" data-target="view-cloro"><i class="fas fa-vial"></i> Teste de Cloro</a></li>
                 </ul>
             </nav>
@@ -49,7 +49,7 @@
                 </div>
                 
                 <div class="header-actions">
-                    <button id="btnGeneratePdf" class="btn-action btn-report" title="Gerar relatório em PDF"><i class="fas fa-file-pdf"></i> Gerar PDF</button>
+                    <button id="btnGeneratePdf" class="btn-action btn-report" title="Gerar relatório em PDF"><i class="fas fa-file-pdf"></i> Gerar Relatório</button>
                     <button id="btnFullscreen" class="btn-action" title="Expandir para Tela Cheia"><i class="fas fa-expand"></i> Tela Cheia</button>
                     <button id="btnTvMode" class="btn-action btn-tv" title="Iniciar Modo TV"><i class="fas fa-tv"></i> Iniciar Modo TV</button>
                 </div>
@@ -74,58 +74,12 @@
                     </select>
                 </div>
                 <button class="btn-filter"><i class="fas fa-filter"></i> Aplicar</button>
-                <button id="reloadCsvData" class="btn-filter btn-reload"><i class="fas fa-file-csv"></i> Recarregar CSV</button>
-                <div id="dataSourceStatus" class="data-source-status" role="status" aria-live="polite">
-                    <span class="source-dot"></span>
-                    <span>Fonte: carregando...</span>
-                </div>
+                <button id="reloadCsvData" class="btn-filter btn-reload"><i class="fas fa-sync-alt"></i> Atualizar Dados</button>
             </div>
-
-            <section class="data-editor-panel tv-hide" id="dataEditorPanel">
-                <div class="data-editor-header">
-                    <h3><i class="fas fa-table"></i> Base de dados</h3>
-                    <button id="applyDataChanges" class="btn-filter"><i class="fas fa-sync-alt"></i> Atualizar painel</button>
-                </div>
-                <div class="table-responsive data-editor-wrap">
-                    <table class="editor-table">
-                        <thead>
-                            <tr>
-                                <th>Data</th>
-                                <th>DW 7A (m³)</th>
-                                <th>DW 7B (m³)</th>
-                                <th>Nitrogênio (pol)</th>
-                                <th>Cloro (ppm)</th>
-                            </tr>
-                        </thead>
-                        <tbody id="baseDataTableBody"></tbody>
-                    </table>
-                </div>
-            </section>
 
             <!-- ================= VIEW: DASHBOARD GERAL ================= -->
             <div id="view-dashboard" class="view-section active">
                 
-                <!-- KPIs do Mês -->
-                <section class="kpi-container tv-hide">
-                    <div class="kpi-card success">
-                        <div class="kpi-icon"><i class="fas fa-gas-pump"></i></div>
-                        <div class="kpi-data">
-                            <h3>Reabastecimento de Nitrogênio</h3>
-                            <h2 id="kpiIndisponibilidade">--</h2>
-                            <p id="kpiIndisponibilidadeLabel">--</p>
-                        </div>
-                    </div>
-                    <div class="kpi-card danger">
-                        <div class="kpi-icon"><i class="fas fa-exclamation-triangle"></i></div>
-                        <div class="kpi-data">
-                            <h3>Parada de Utilidade</h3>
-                            <h2 id="kpiDowntime">--</h2>
-                            <p id="kpiDowntimeLabel">--</p>
-                            <p id="kpiDowntimeComment">--</p>
-                        </div>
-                    </div>
-                </section>
-
                 <!-- NOVO: Resumo do Dia Atual -->
                 <section class="daily-summary-container tv-hide">
                     <div class="daily-summary-header">
@@ -133,40 +87,61 @@
                         <span id="dailyDateBadge" class="badge">Carregando...</span>
                     </div>
                     <div class="daily-cards">
-                        <div class="daily-card">
+                        <div class="daily-card daily-card-nitrogen">
                             <i class="fas fa-flask"></i>
                             <div>
                                 <h4>Nitrogênio</h4>
                                 <strong id="dailyNitro">--</strong>
                             </div>
                         </div>
-                        <div class="daily-card">
+                        <div class="daily-card daily-card-water-light">
                             <i class="fas fa-tint"></i>
                             <div>
                                 <h4>Consumo DW 7A</h4>
                                 <strong id="dailyDw7a">--</strong>
                             </div>
                         </div>
-                        <div class="daily-card">
-                            <i class="fas fa-tint" style="color: #27ae60;"></i>
+                        <div class="daily-card daily-card-water-dark">
+                            <i class="fas fa-tint"></i>
                             <div>
                                 <h4>Consumo DW 7B</h4>
                                 <strong id="dailyDw7b">--</strong>
                             </div>
                         </div>
-                        <div class="daily-card">
+                        <div class="daily-card daily-card-chlorine">
                             <i class="fas fa-vial"></i>
                             <div>
                                 <h4>Teste de Cloro</h4>
                                 <strong id="dailyCloro">--</strong>
                             </div>
                         </div>
-                        <div class="daily-card">
+                        <div class="daily-card daily-card-availability">
                             <i class="fas fa-percent"></i>
                             <div>
-                                <h4>Disponibilidade das Utilidades no Mês Atual</h4>
+                                <h4>Disponibilidade Diária das Utilidades</h4>
                                 <strong id="avgAvailability" style="color: #2ecc71;">--</strong>
                             </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- KPIs do Mês -->
+                <section class="kpi-container tv-hide">
+                    <div class="kpi-card success">
+                        <div class="kpi-icon"><i class="fas fa-gas-pump"></i></div>
+                        <div class="kpi-data">
+                            <h3>Último Reabastecimento de Nitrogênio</h3>
+                            <h2 id="kpiIndisponibilidade">--</h2>
+                            <p id="kpiIndisponibilidadeLabel">--</p>
+                        </div>
+                    </div>
+                    <div class="kpi-card danger">
+                        <div class="kpi-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                        <div class="kpi-data">
+                            <h3>Última Parada de Utilidades Registrada</h3>
+                            <h2 id="kpiDowntime">--</h2>
+                            <p id="kpiDowntimeLabel">--</p>
+                            <p id="kpiDowntimeComment">--</p>
                         </div>
                     </div>
                 </section>
@@ -198,7 +173,7 @@
             <div id="view-disponibilidade" class="view-section">
                 <div class="module-container">
                     <div class="chart-card tv-chart">
-                        <h3>Disponibilidade das Utilidades</h3>
+                        <h3>Disponibilidade Diária das Utilidades</h3>
                         <div class="availability-panel">
                             <div class="availability-summary">
                                 <span id="availabilitySummary" class="availability-total">0/0 disponíveis</span>
@@ -211,7 +186,7 @@
                             <div class="table-header-custom"><i class="fas fa-comment-alt"></i> <h3>Ocorrências das Utilidades</h3></div>
                             <div class="table-responsive">
                                 <table>
-                                    <thead><tr><th>Data</th><th>Utilidade</th><th>Comentário</th></tr></thead>
+                                    <thead><tr><th>Data</th><th>Utilidade</th><th>Paradas</th><th>Tempo indisponível</th><th>Comentário</th></tr></thead>
                                     <tbody id="availabilityCommentsTableBody"></tbody>
                                 </table>
                             </div>
@@ -266,7 +241,7 @@
             <div id="view-indisponibilidade" class="view-section">
                 <div class="module-container">
                     <div class="chart-card tv-chart">
-                        <h3>Indisponibilidade por Utilidade (Horas)</h3>
+                        <h3>Indisponibilidade das Utilidades (Horas)</h3>
                         <div class="chart-wrapper"><canvas id="indispChart"></canvas></div>
                     </div>
                     <section class="reference-section indisponibilidade-tv-table">
@@ -274,7 +249,7 @@
                             <div class="table-header-custom"><i class="fas fa-comment-alt"></i> <h3>Ocorrências das Utilidades</h3></div>
                             <div class="table-responsive">
                                 <table>
-                                    <thead><tr><th>Data</th><th>Utilidade</th><th>Comentário</th></tr></thead>
+                                    <thead><tr><th>Data</th><th>Utilidade</th><th>Paradas</th><th>Tempo indisponível</th><th>Comentário</th></tr></thead>
                                     <tbody id="logTableBody"></tbody>
                                 </table>
                             </div>
