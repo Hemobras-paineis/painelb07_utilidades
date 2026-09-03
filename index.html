@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="style.css?v=painel-atualizado">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
-    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
     </script>
@@ -43,8 +42,11 @@
             <!-- Barra Superior Principal -->
             <header class="top-bar">
                 <div class="top-bar-left">
-                    <div class="page-title">
-                        <h1 id="pageTitle">Visão Geral da Operação</h1>
+                    <div class="top-bar-title-row">
+                        <button id="btnSidebarToggle" class="btn-action btn-sidebar-toggle" title="Recolher/Expandir menu lateral"><i class="fas fa-bars"></i></button>
+                        <div class="page-title">
+                            <h1 id="pageTitle">Visão Geral da Operação</h1>
+                        </div>
                     </div>
                     <div id="liveClock" class="live-clock"><i class="far fa-clock"></i> Carregando...</div>
                 </div>
@@ -52,7 +54,7 @@
                 <div class="header-actions">
                     <button id="btnGeneratePdf" class="btn-action btn-report" title="Gerar relatório em PDF"><i class="fas fa-file-pdf"></i> Gerar Relatório</button>
                     <button id="btnFullscreen" class="btn-action" title="Expandir para Tela Cheia"><i class="fas fa-expand"></i> Tela Cheia</button>
-                    <button id="btnTvMode" class="btn-action btn-tv" title="Iniciar Modo TV"><i class="fas fa-tv"></i> Iniciar Modo TV</button>
+                    <button id="btnTvMode" class="btn-action btn-tv" title="Iniciar Modo TV (tecla *)"><i class="fas fa-tv"></i> Iniciar Modo TV</button>
                 </div>
             </header>
 

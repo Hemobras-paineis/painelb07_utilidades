@@ -350,6 +350,17 @@ if (typeof document !== 'undefined') {
         });
     });
 
+// --- Recolher/Expandir Menu Lateral ---
+const btnSidebarToggle = document.getElementById('btnSidebarToggle');
+if (btnSidebarToggle) {
+btnSidebarToggle.addEventListener('click', () => {
+document.body.classList.toggle('sidebar-collapsed');
+const isCollapsed = document.body.classList.contains('sidebar-collapsed');
+btnSidebarToggle.innerHTML = isCollapsed ? '<i class="fas fa-angle-double-right"></i>' : '<i class="fas fa-bars"></i>';
+setTimeout(() => window.dispatchEvent(new Event('resize')), 450);
+});
+}
+
     // --- Lógica de Tela Cheia ---
     const btnFullscreen = document.getElementById('btnFullscreen');
     btnFullscreen.addEventListener('click', () => {
@@ -409,136 +420,12 @@ preTvDateFilter = null;
 applyDateFilters();
 }
 
-// --- GRAVAÇÃO DE VÍDEO MP4 NO MODO TV ---
-let tvMediaRecorder = null;
-let tvRecordedChunks = [];
-let tvRecordCanvas = null;
-let tvRecordCtx = null;
-let tvRecordInterval = null;
-let tvRecordBadge = null;
-
-function createRecordBadge() {
-    if (document.getElementById('tvRecordBadge')) return;
-    const badge = document.createElement('div');
-    badge.id = 'tvRecordBadge';
-    badge.style.cssText = 'position: fixed; top: 15px; right: 200px; z-index: 10000; background: rgba(231, 76, 60, 0.95); color: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.3); font-family: sans-serif; pointer-events: none;';
-    badge.innerHTML = '<span style="width: 10px; height: 10px; background: white; border-radius: 50%; display: inline-block; animation: pulse 1s infinite;"></span> Gravando Vídeo MP4 (Modo TV)';
-    
-    if (!document.getElementById('tvRecordBadgeStyle')) {
-        const style = document.createElement('style');
-        style.id = 'tvRecordBadgeStyle';
-        style.innerHTML = '@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }';
-        document.head.appendChild(style);
-    }
-    document.body.appendChild(badge);
-    tvRecordBadge = badge;
-}
-
-function removeRecordBadge() {
-    if (tvRecordBadge) {
-        tvRecordBadge.remove();
-        tvRecordBadge = null;
-    }
-}
-
-async function startTvVideoRecording() {
-    try {
-        tvRecordedChunks = [];
-        tvRecordCanvas = document.createElement('canvas');
-        tvRecordCanvas.width = window.innerWidth || 1920;
-        tvRecordCanvas.height = window.innerHeight || 1080;
-        tvRecordCtx = tvRecordCanvas.getContext('2d');
-
-        const stream = tvRecordCanvas.captureStream(15);
-
-        let mimeType = 'video/mp4;codecs=avc1';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-            if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4';
-            else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) mimeType = 'video/webm;codecs=h264';
-            else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) mimeType = 'video/webm;codecs=vp9';
-            else mimeType = 'video/webm';
-        }
-
-        tvMediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 5000000 });
-        window.tvMediaRecorder = tvMediaRecorder;
-
-        tvMediaRecorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) {
-                tvRecordedChunks.push(e.data);
-            }
-        };
-
-        tvMediaRecorder.onstop = () => {
-            if (tvRecordedChunks.length > 0) {
-                const blob = new Blob(tvRecordedChunks, { type: mimeType });
-                window.lastTvVideoBlob = blob;
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = 'Painel_Hemobras_Modo_TV.mp4';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    if (document.body.contains(a)) document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 200);
-            }
-        };
-
-        tvMediaRecorder.start(1000);
-        createRecordBadge();
-
-        const captureFrame = async () => {
-            if (!isTvModeActive) return;
-            try {
-                if (typeof html2canvas === 'undefined') return;
-                const canvas = await html2canvas(document.body, {
-                    scale: 1,
-                    useCORS: true,
-                    logging: false,
-                    width: window.innerWidth,
-                    height: window.innerHeight,
-                    ignoreElements: (element) => element.id === 'tvRecordBadge'
-                });
-                if (tvRecordCanvas && tvRecordCtx) {
-                    if (tvRecordCanvas.width !== canvas.width || tvRecordCanvas.height !== canvas.height) {
-                        tvRecordCanvas.width = canvas.width;
-                        tvRecordCanvas.height = canvas.height;
-                    }
-                    tvRecordCtx.drawImage(canvas, 0, 0);
-                }
-            } catch (err) {
-                console.warn('Erro ao capturar frame para vídeo:', err);
-            }
-        };
-
-        captureFrame();
-        tvRecordInterval = setInterval(captureFrame, 200);
-
-    } catch (err) {
-        console.error('Erro ao iniciar gravação do Modo TV:', err);
-    }
-}
-
-function stopTvVideoRecording() {
-    if (tvRecordInterval) {
-        clearInterval(tvRecordInterval);
-        tvRecordInterval = null;
-    }
-    removeRecordBadge();
-    if (tvMediaRecorder && tvMediaRecorder.state !== 'inactive') {
-        tvMediaRecorder.stop();
-    }
-}
-
-btnTvMode.addEventListener('click', () => {
+function toggleTvMode() {
 isTvModeActive = !isTvModeActive;
 if (isTvModeActive) {
 document.body.classList.add('tv-mode-active');
 btnTvMode.innerHTML = '<i class="fas fa-stop"></i> Parar TV';
-// Sem estilo de alerta chamativo, apenas muda o texto
-            
+
 applyTvDateFilter();
 try {
     if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
@@ -546,17 +433,25 @@ try {
     }
 } catch (e) {}
 startTvCarousel();
-startTvVideoRecording();
 if (window.setIndispChartTvFonts) window.setIndispChartTvFonts(true);
 } else {
 document.body.classList.remove('tv-mode-active');
 btnTvMode.innerHTML = '<i class="fas fa-tv"></i> Iniciar Modo TV';
 stopTvCarousel();
-stopTvVideoRecording();
 restorePreTvDateFilter();
 if (window.setIndispChartTvFonts) window.setIndispChartTvFonts(false);
 setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
 }
+}
+
+btnTvMode.addEventListener('click', toggleTvMode);
+
+document.addEventListener('keydown', (event) => {
+    if (event.key !== '*') return;
+    if (event.repeat) return;
+    const target = event.target;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
+    toggleTvMode();
 });
 
     function animateTvProgress() {
@@ -1016,28 +911,45 @@ downtimeComments.push(...downtimeFromSource);
 
         const logTbody = document.getElementById('logTableBody');
         if (logTbody) {
-    const occurrences = [...downtimeData]
+const occurrences = getFilteredDowntimeData()
                 .sort((a, b) => new Date(normalizeDateValue(a.d)) - new Date(normalizeDateValue(b.d)));
-    logTbody.innerHTML = (occurrences.length ? occurrences : [{ d: 'Sem dados', u: '-', p: '-', h: '-', m: 'Nenhuma ocorrência registrada.' }])
+logTbody.innerHTML = (occurrences.length ? occurrences : [{ d: 'Sem dados', u: '-', p: '-', h: '-', m: 'Nenhuma ocorrência registrada no período selecionado.' }])
         .map((item) => `<tr><td><strong>${item.d}</strong></td><td><span style="color:#2980b9; font-weight:500">${item.u}</span></td><td>${item.p}</td><td>${item.h}</td><td>${item.m}</td></tr>`)
                 .join('');
         }
 
         const availabilityCommentsTbody = document.getElementById('availabilityCommentsTableBody');
         if (availabilityCommentsTbody) {
-    const occurrences = [...downtimeData]
+const occurrences = getFilteredDowntimeData()
                 .sort((a, b) => new Date(normalizeDateValue(a.d)) - new Date(normalizeDateValue(b.d)));
-    availabilityCommentsTbody.innerHTML = (occurrences.length ? occurrences : [{ d: 'Sem dados', u: '-', p: '-', h: '-', m: 'Nenhuma ocorrência registrada.' }])
+availabilityCommentsTbody.innerHTML = (occurrences.length ? occurrences : [{ d: 'Sem dados', u: '-', p: '-', h: '-', m: 'Nenhuma ocorrência registrada no período selecionado.' }])
         .map((item) => `<tr><td><strong>${item.d}</strong></td><td><span style="color:#2980b9; font-weight:500">${item.u}</span></td><td>${item.p}</td><td>${item.h}</td><td>${item.m}</td></tr>`)
                 .join('');
         }
     }
 
+function getFilteredDowntimeData() {
+const dateStartValue = document.getElementById('dateStart')?.value;
+const dateEndValue = document.getElementById('dateEnd')?.value;
+
+if (!dateStartValue || !dateEndValue) {
+    return [...downtimeData];
+}
+
+const periodStart = new Date(`${normalizeDateValue(dateStartValue)}T00:00:00`).getTime();
+const periodEnd = new Date(`${normalizeDateValue(dateEndValue)}T23:59:59`).getTime();
+
+return downtimeData.filter((item) => {
+    const itemDate = new Date(`${normalizeDateValue(item.d)}T00:00:00`).getTime();
+    return !Number.isNaN(itemDate) && itemDate >= periodStart && itemDate <= periodEnd;
+});
+}
+
     function renderDowntimeChart() {
         const indispChart = window.indispChart;
         if (!indispChart) return;
 
-        const byUtility = downtimeData.reduce((totals, item) => {
+        const byUtility = getFilteredDowntimeData().reduce((totals, item) => {
             const name = item.u || 'Não informado';
             const existing = totals.get(name) || { hours: 0, stops: 0 };
             totals.set(name, {
