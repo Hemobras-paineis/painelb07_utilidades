@@ -46,7 +46,7 @@ function filterDateRange(labels, startDate, endDate, fallbackYear = DEFAULT_YEAR
             filtered.push(label);
             indexes.push(index);
         }
-    });
+        });
 
     return { labels: filtered, indexes };
 }
@@ -181,7 +181,7 @@ function buildDataStateFromCsv(csvText) {
         }
 
         return '';
-    };
+    };
 
     const diasAgosto = rows.map((row) => getValue(row, ['data', 'date', 'dia', 'datas'])).filter(Boolean);
 
@@ -202,7 +202,7 @@ function buildDataStateFromCsv(csvText) {
             return {
                 dw7A: value7B,
                 dw7B: value7,
-            };
+            };
         }
 
         if (raw7A || raw7B || raw7) {
@@ -376,25 +376,188 @@ if (typeof document !== 'undefined') {
         { id: 'view-cloro', title: 'Teste de Cloro' }
     ];
     const TIME_PER_SLIDE = 20000;
-    const btnTvMode = document.getElementById('btnTvMode');
-    const progressBar = document.getElementById('tvProgressBar');
+const TV_DAYS_RANGE = 7; // Dia atual + 6 dias anteriores
+const btnTvMode = document.getElementById('btnTvMode');
+const progressBar = document.getElementById('tvProgressBar');
+let preTvDateFilter = null;
 
-    btnTvMode.addEventListener('click', () => {
-        isTvModeActive = !isTvModeActive;
-        if (isTvModeActive) {
-            document.body.classList.add('tv-mode-active');
-            btnTvMode.innerHTML = '<i class="fas fa-stop"></i> Parar TV';
-            // Sem estilo de alerta chamativo, apenas muda o texto
-            
-            if (!document.fullscreenElement) document.documentElement.requestFullscreen();
-            startTvCarousel();
-        } else {
-            document.body.classList.remove('tv-mode-active');
-            btnTvMode.innerHTML = '<i class="fas fa-tv"></i> Iniciar Modo TV';
-            stopTvCarousel();
-            setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
-        }
-    });
+function applyTvDateFilter() {
+const dateStart = document.getElementById('dateStart');
+const dateEnd = document.getElementById('dateEnd');
+if (!dateStart || !dateEnd) return;
+
+preTvDateFilter = { start: dateStart.value, end: dateEnd.value };
+
+const today = new Date();
+const rangeStart = new Date(today);
+rangeStart.setDate(rangeStart.getDate() - (TV_DAYS_RANGE - 1));
+
+dateEnd.value = today.toISOString().slice(0, 10);
+dateStart.value = rangeStart.toISOString().slice(0, 10);
+
+applyDateFilters();
+}
+
+function restorePreTvDateFilter() {
+if (!preTvDateFilter) return;
+const dateStart = document.getElementById('dateStart');
+const dateEnd = document.getElementById('dateEnd');
+if (dateStart) dateStart.value = preTvDateFilter.start;
+if (dateEnd) dateEnd.value = preTvDateFilter.end;
+preTvDateFilter = null;
+
+applyDateFilters();
+}
+
+// --- GRAVAÇÃO DE VÍDEO MP4 NO MODO TV ---
+let tvMediaRecorder = null;
+let tvRecordedChunks = [];
+let tvRecordCanvas = null;
+let tvRecordCtx = null;
+let tvRecordInterval = null;
+let tvRecordBadge = null;
+
+function createRecordBadge() {
+    if (document.getElementById('tvRecordBadge')) return;
+    const badge = document.createElement('div');
+    badge.id = 'tvRecordBadge';
+    badge.style.cssText = 'position: fixed; top: 15px; right: 200px; z-index: 10000; background: rgba(231, 76, 60, 0.95); color: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.3); font-family: sans-serif; pointer-events: none;';
+    badge.innerHTML = '<span style="width: 10px; height: 10px; background: white; border-radius: 50%; display: inline-block; animation: pulse 1s infinite;"></span> Gravando Vídeo MP4 (Modo TV)';
+    
+    if (!document.getElementById('tvRecordBadgeStyle')) {
+        const style = document.createElement('style');
+        style.id = 'tvRecordBadgeStyle';
+        style.innerHTML = '@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }';
+        document.head.appendChild(style);
+    }
+    document.body.appendChild(badge);
+    tvRecordBadge = badge;
+}
+
+function removeRecordBadge() {
+    if (tvRecordBadge) {
+        tvRecordBadge.remove();
+        tvRecordBadge = null;
+    }
+}
+
+async function startTvVideoRecording() {
+    try {
+        tvRecordedChunks = [];
+        tvRecordCanvas = document.createElement('canvas');
+        tvRecordCanvas.width = window.innerWidth || 1920;
+        tvRecordCanvas.height = window.innerHeight || 1080;
+        tvRecordCtx = tvRecordCanvas.getContext('2d');
+
+        const stream = tvRecordCanvas.captureStream(15);
+
+        let mimeType = 'video/mp4;codecs=avc1';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4';
+            else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) mimeType = 'video/webm;codecs=h264';
+            else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) mimeType = 'video/webm;codecs=vp9';
+            else mimeType = 'video/webm';
+        }
+
+        tvMediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 5000000 });
+        window.tvMediaRecorder = tvMediaRecorder;
+
+        tvMediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+                tvRecordedChunks.push(e.data);
+            }
+        };
+
+        tvMediaRecorder.onstop = () => {
+            if (tvRecordedChunks.length > 0) {
+                const blob = new Blob(tvRecordedChunks, { type: mimeType });
+                window.lastTvVideoBlob = blob;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'Painel_Hemobras_Modo_TV.mp4';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    if (document.body.contains(a)) document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 200);
+            }
+        };
+
+        tvMediaRecorder.start(1000);
+        createRecordBadge();
+
+        const captureFrame = async () => {
+            if (!isTvModeActive) return;
+            try {
+                if (typeof html2canvas === 'undefined') return;
+                const canvas = await html2canvas(document.body, {
+                    scale: 1,
+                    useCORS: true,
+                    logging: false,
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    ignoreElements: (element) => element.id === 'tvRecordBadge'
+                });
+                if (tvRecordCanvas && tvRecordCtx) {
+                    if (tvRecordCanvas.width !== canvas.width || tvRecordCanvas.height !== canvas.height) {
+                        tvRecordCanvas.width = canvas.width;
+                        tvRecordCanvas.height = canvas.height;
+                    }
+                    tvRecordCtx.drawImage(canvas, 0, 0);
+                }
+            } catch (err) {
+                console.warn('Erro ao capturar frame para vídeo:', err);
+            }
+        };
+
+        captureFrame();
+        tvRecordInterval = setInterval(captureFrame, 200);
+
+    } catch (err) {
+        console.error('Erro ao iniciar gravação do Modo TV:', err);
+    }
+}
+
+function stopTvVideoRecording() {
+    if (tvRecordInterval) {
+        clearInterval(tvRecordInterval);
+        tvRecordInterval = null;
+    }
+    removeRecordBadge();
+    if (tvMediaRecorder && tvMediaRecorder.state !== 'inactive') {
+        tvMediaRecorder.stop();
+    }
+}
+
+btnTvMode.addEventListener('click', () => {
+isTvModeActive = !isTvModeActive;
+if (isTvModeActive) {
+document.body.classList.add('tv-mode-active');
+btnTvMode.innerHTML = '<i class="fas fa-stop"></i> Parar TV';
+// Sem estilo de alerta chamativo, apenas muda o texto
+            
+applyTvDateFilter();
+try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+    }
+} catch (e) {}
+startTvCarousel();
+startTvVideoRecording();
+if (window.setIndispChartTvFonts) window.setIndispChartTvFonts(true);
+} else {
+document.body.classList.remove('tv-mode-active');
+btnTvMode.innerHTML = '<i class="fas fa-tv"></i> Iniciar Modo TV';
+stopTvCarousel();
+stopTvVideoRecording();
+restorePreTvDateFilter();
+if (window.setIndispChartTvFonts) window.setIndispChartTvFonts(false);
+setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
+}
+});
 
     function animateTvProgress() {
         progressBar.style.transition = 'none';
@@ -1038,25 +1201,35 @@ const dispChart = new Chart(dispCanvas.getContext('2d'), { type: 'bar', data: { 
 
     const dwChartTvCanvas = document.getElementById('dwChartTv');
     if (dwChartTvCanvas) {
-        const dwChartTv = new Chart(dwChartTvCanvas.getContext('2d'), { type: 'bar', data: { labels: diasAgosto, datasets: [ { label: 'DW 7A (m³)', data: dw7A, backgroundColor: '#3498db', borderRadius: 5 }, { label: 'DW 7B (m³)', data: dw7B, backgroundColor: '#27ae60', borderRadius: 5 } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: false, ticks: { font: { size: 14 } }, grid: { color: 'rgba(0,0,0,0.08)' } }, x: { ticks: { font: { size: 12 } } } }, plugins: { legend: { labels: { font: { size: 14 } } }, datalabels: { color: '#000', font: { weight: 'bold', size: 12 }, formatter: (value) => value.toFixed(1) } } } });
+        const dwChartTv = new Chart(dwChartTvCanvas.getContext('2d'), { type: 'bar', data: { labels: diasAgosto, datasets: [ { label: 'DW 7A (m³)', data: dw7A, backgroundColor: '#3498db', borderRadius: 5 }, { label: 'DW 7B (m³)', data: dw7B, backgroundColor: '#27ae60', borderRadius: 5 } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: false, ticks: { font: { size: 20 } }, grid: { color: 'rgba(0,0,0,0.08)' } }, x: { ticks: { font: { size: 20 } } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { color: '#000', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(1) } } } });
         window.dwChartTv = dwChartTv;
     }
 
     const nitrogenChartTvCanvas = document.getElementById('nitrogenChartTv');
     if (nitrogenChartTvCanvas) {
-        const nitrogenChartTv = new Chart(nitrogenChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Nitrogênio (pol)', data: nitrogenNivel, borderColor: '#9b59b6', backgroundColor: 'rgba(155, 89, 182, 0.2)', borderWidth: 3, fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { datalabels: { color: '#9b59b6', font: { weight: 'bold', size: 11 }, formatter: (value) => value.toFixed(1), anchor: 'end', align: 'top', offset: 8 } } } });
+        const nitrogenChartTv = new Chart(nitrogenChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Nitrogênio (pol)', data: nitrogenNivel, borderColor: '#9b59b6', backgroundColor: 'rgba(155, 89, 182, 0.2)', borderWidth: 3, fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 20 } } }, y: { ticks: { font: { size: 20 } } } }, plugins: { datalabels: { color: '#9b59b6', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(1), anchor: 'end', align: 'top', offset: 8 } } } });
         window.nitrogenChartTv = nitrogenChartTv;
     }
 
     const indispCanvas = document.getElementById('indispChart');
     if (indispCanvas) {
-    const indispChart = new Chart(indispCanvas.getContext('2d'), { type: 'bar', data: { labels: ['CW Proc 7A', 'CW Proc 7B', 'CW HVAC 7A', 'CW HVAC 7B', 'WFI 7B', 'SFI 7A', 'SFI 7B'], datasets: [{ label: 'Tempo Indisponível (Horas)', data: [6.1, 24.6, 5.3, 5.3, 19.3, 6.7, 24.6], backgroundColor: '#e74c3c', borderRadius: 5, yAxisID: 'y' }, { label: 'Quantidade de Paradas', data: [1, 1, 1, 1, 1, 1, 1], backgroundColor: '#3498db', borderRadius: 5, yAxisID: 'yStops' }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, scales: { y: { beginAtZero: true, position: 'left', ticks: { font: { size: 14 } }, grid: { color: 'rgba(0,0,0,0.08)' } }, yStops: { beginAtZero: true, max: 5, position: 'right', grid: { drawOnChartArea: false }, ticks: { precision: 0, font: { size: 14 } } }, x: { ticks: { font: { size: 13 } } } }, plugins: { legend: { labels: { font: { size: 14 } } }, datalabels: { display: true, color: '#2c3e50', anchor: 'end', align: 'top', offset: 4, clamp: true, font: { weight: 'bold', size: 14 }, formatter: (value, context) => context.dataset.yAxisID === 'yStops' ? value : value.toFixed(1) + 'h' } } } });
-        window.indispChart = indispChart;
+    const indispChart = new Chart(indispCanvas.getContext('2d'), { type: 'bar', data: { labels: ['CW Proc 7A', 'CW Proc 7B', 'CW HVAC 7A', 'CW HVAC 7B', 'WFI 7B', 'SFI 7A', 'SFI 7B'], datasets: [{ label: 'Tempo Indisponível (Horas)', data: [6.1, 24.6, 5.3, 5.3, 19.3, 6.7, 24.6], backgroundColor: '#e74c3c', borderRadius: 5, yAxisID: 'y' }, { label: 'Quantidade de Paradas', data: [1, 1, 1, 1, 1, 1, 1], backgroundColor: '#3498db', borderRadius: 5, yAxisID: 'yStops' }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } }, scales: { y: { beginAtZero: true, position: 'left', ticks: { font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.08)' } }, yStops: { beginAtZero: true, max: 5, position: 'right', grid: { drawOnChartArea: false }, ticks: { precision: 0, font: { size: 10 } } }, x: { ticks: { font: { size: 10 } } } }, plugins: { legend: { labels: { font: { size: 10 } } }, datalabels: { display: true, color: '#2c3e50', anchor: 'end', align: 'top', offset: 4, clamp: true, font: { weight: 'bold', size: 9 }, formatter: (value, context) => context.dataset.yAxisID === 'yStops' ? value : value.toFixed(1) + 'h' } } } });
+window.indispChart = indispChart;
+window.setIndispChartTvFonts = (isTv) => {
+    const tickSize = isTv ? 12 : 10;
+    const labelSize = isTv ? 11 : 9;
+    indispChart.options.scales.y.ticks.font.size = tickSize;
+    indispChart.options.scales.yStops.ticks.font.size = tickSize;
+    indispChart.options.scales.x.ticks.font.size = tickSize;
+    indispChart.options.plugins.legend.labels.font.size = tickSize;
+    indispChart.options.plugins.datalabels.font.size = labelSize;
+    indispChart.update();
+};
     }
 
     const chlorineChartTvCanvas = document.getElementById('chlorineChartTv');
     if (chlorineChartTvCanvas) {
-    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { suggestedMin: 0, suggestedMax: 3 } }, plugins: { datalabels: { display: (context) => context.datasetIndex < 2 && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 11 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
+    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 20 } } }, y: { suggestedMin: 0, suggestedMax: 3, ticks: { font: { size: 20 } } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { display: (context) => context.datasetIndex < 2 && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
         window.chlorineChartTv = chlorineChartTv;
     }
 
