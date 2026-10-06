@@ -229,7 +229,17 @@ function buildDataStateFromCsv(csvText) {
 
     const dw7A = dwValues.map(item => item.dw7A);
     const dw7B = dwValues.map(item => item.dw7B);
-    const nitrogenNivel = rows.map((row) => parseNumberValue(getValue(row, ['nitrogenio', 'nitrogenioppm', 'nitrogenioNivel', 'nitrogenioN', 'nitrogenioL', 'n2', 'nitrogenio1', 'nitrogenioff'])));
+
+    // A observação de cada DW é a coluna imediatamente à direita dele na planilha.
+    const rowKeys = Object.keys(rows[0] || {});
+    const getObservations = (dwKey) => {
+        const dwIndex = rowKeys.indexOf(dwKey);
+        const obsKey = dwIndex >= 0 && /^ob[a-z]*rvacao/.test(rowKeys[dwIndex + 1] || '') ? rowKeys[dwIndex + 1] : null;
+        return rows.map((row) => (obsKey ? String(row[obsKey] ?? '').trim() : ''));
+    };
+    const obsDw7A = getObservations('dw7a');
+    const obsDw7B = getObservations('dw7b');
+    const nitrogenNivel = rows.map((row) => parseNumberValue(getValue(row, ['nitrogenio', 'nitrogenioppm', 'nitrogenioNivel', 'nitrogenioN', 'nitrogenioL', 'n2', 'nitrogenio1', 'nitrogenioff'])));
     const cloroPpm = rows.map((row) => parseNumberValue(getValue(row, ['cloro', 'cloroppm', 'cloroPpm', 'testecloro', 'testedecloro', 'testedecloroppm', 'chlor', 'teste de cloro'])));
     const retestePpm = rows.map((row) => {
         const value = getValue(row, ['reteste', 'retestecloro', 'testedereteste']);
@@ -244,7 +254,7 @@ function buildDataStateFromCsv(csvText) {
         }))
         .filter((item) => item.d && item.r && item.r !== '-');
 
-    return { diasAgosto, dw7A, dw7B, nitrogenNivel, cloroPpm, retestePpm, nitroData };
+    return { diasAgosto, dw7A, dw7B, obsDw7A, obsDw7B, nitrogenNivel, cloroPpm, retestePpm, nitroData };
 }
 
 function buildDowntimeStateFromCsv(csvText) {
@@ -498,7 +508,11 @@ document.addEventListener('keydown', (event) => {
     let diasAgosto = [...baseDataState.diasAgosto];
     let dw7A = [...baseDataState.dw7A];
     let dw7B = [...baseDataState.dw7B];
-    let nitrogenNivel = [...baseDataState.nitrogenNivel];
+    let obsDw7A = baseDataState.diasAgosto.map(() => '');
+    let obsDw7B = baseDataState.diasAgosto.map(() => '');
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    const dwRowHtml = (dia, i) => `<tr><td><strong>${String(dia).split('/').length > 2 ? dia : dia + '/2026'}</strong></td><td>${dw7A[i].toFixed(1)}</td><td>${escapeHtml(obsDw7A[i]) || '-'}</td><td>${dw7B[i].toFixed(1)}</td><td>${escapeHtml(obsDw7B[i]) || '-'}</td></tr>`;
+    let nitrogenNivel = [...baseDataState.nitrogenNivel];
     let cloroPpm = [...baseDataState.cloroPpm];
     let retestePpm = [...baseDataState.retestePpm];
     let nitroData = [{d: '05/08/2026', n: '116,3', r: '280,2 pol'}, {d: '26/08/2026', n: '218,9', r: 'pol'}];
@@ -590,7 +604,9 @@ function syncAvailabilityForDate(referenceDate) {
                 diasAgosto = [...parsed.diasAgosto];
                 dw7A = [...parsed.dw7A];
                 dw7B = [...parsed.dw7B];
-                nitrogenNivel = [...parsed.nitrogenNivel];
+                obsDw7A = [...parsed.obsDw7A];
+                obsDw7B = [...parsed.obsDw7B];
+                nitrogenNivel = [...parsed.nitrogenNivel];
                 cloroPpm = [...parsed.cloroPpm];
                 retestePpm = [...parsed.retestePpm];
                 nitroData = [...parsed.nitroData];
@@ -619,7 +635,9 @@ downtimeComments.push(...downtimeFromSource);
         diasAgosto = [...defaultData.diasAgosto];
         dw7A = [...defaultData.dw7A];
         dw7B = [...defaultData.dw7B];
-        nitrogenNivel = [...defaultData.nitrogenNivel];
+        obsDw7A = defaultData.diasAgosto.map(() => '');
+        obsDw7B = defaultData.diasAgosto.map(() => '');
+        nitrogenNivel = [...defaultData.nitrogenNivel];
         cloroPpm = [...defaultData.cloroPpm];
     retestePpm = [...defaultData.retestePpm];
                 syncAvailabilityForDate(document.getElementById('dateEnd')?.value);
@@ -880,10 +898,7 @@ downtimeComments.push(...downtimeFromSource);
     function renderFilteredTables(labels, indexes) {
         const dwTbody = document.getElementById('dwTableBody');
         if (dwTbody) {
-            dwTbody.innerHTML = labels.map((dia, i) => {
-                const originalIndex = indexes[i];
-                return `<tr><td><strong>${dia}/2026</strong></td><td>${dw7A[originalIndex].toFixed(1)}</td><td>${dw7B[originalIndex].toFixed(1)}</td></tr>`;
-            }).join('');
+dwTbody.innerHTML = labels.map((dia, i) => dwRowHtml(dia, indexes[i])).join('');
         }
 
         const cloroTbody = document.getElementById('cloroTableBody');
@@ -1152,7 +1167,7 @@ window.setIndispChartTvFonts = (isTv) => {
 
     const dwTbody = document.getElementById('dwTableBody');
     if (dwTbody) {
-        dwTbody.innerHTML = diasAgosto.map((dia, i) => `<tr><td><strong>${dia}/2026</strong></td><td>${dw7A[i].toFixed(1)}</td><td>${dw7B[i].toFixed(1)}</td></tr>`).join('');
+dwTbody.innerHTML = diasAgosto.map(dwRowHtml).join('');
     }
 
     const nitroTbody = document.getElementById('nitroTableBody');
@@ -1196,6 +1211,16 @@ window.setIndispChartTvFonts = (isTv) => {
             const startDate = document.getElementById('dateStart')?.value || '';
             const endDate = document.getElementById('dateEnd')?.value || '';
             const bloco = document.getElementById('blocoFilter')?.value || 'all';
+const selectedModule = document.getElementById('reportModuleFilter')?.value || 'all';
+const moduleTitles = {
+    all: 'Todos os módulos',
+    availability: 'Disponibilidade Diária',
+    dw: 'DW',
+    nitrogenio: 'Nitrogênio',
+    indisponibilidade: 'Indisponibilidade das Utilidades',
+    cloro: 'Teste de Cloro'
+};
+const moduleTitle = moduleTitles[selectedModule] || moduleTitles.all;
 
             const filteredLabels = filterDateRange(diasAgosto, startDate, endDate).labels;
             const filteredDw7A = filteredLabels.map((label) => {
@@ -1215,27 +1240,31 @@ window.setIndispChartTvFonts = (isTv) => {
                 return Number.isFinite(cloroPpm[idx]) ? cloroPpm[idx] : 0;
             });
 
-            const maxDw = Math.max(...filteredDw7A, 0);
-            const maxNitro = Math.max(...filteredNitro, 0);
-            const avgCloro = filteredCloro.length ? filteredCloro.reduce((sum, value) => sum + value, 0) / filteredCloro.length : 0;
-            const downtimeInRange = downtimeComments
-                .filter((comment) => {
-                const itemDate = new Date(`${normalizeDateValue(comment.d)}T00:00:00`);
-                const start = new Date(`${startDate}T00:00:00`);
-                const end = new Date(`${endDate}T23:59:59`);
-                const matchesBlock = bloco === 'all' || comment.u.endsWith(bloco);
-                return matchesBlock && itemDate >= start && itemDate <= end;
-                })
-                .map((comment) => {
-                    const stop = downtimeData.find((item) => normalizeCsvHeader(item.u) === normalizeCsvHeader(comment.u));
-                    return {
-                        d: comment.d,
-                        u: comment.u,
-                        p: stop?.p || '-',
-                        h: stop?.h || '-',
-                        m: comment.m
-                    };
-                });
+const maxDw7A = Math.max(...filteredDw7A, 0);
+const maxDw7B = Math.max(...filteredDw7B, 0);
+const maxNitro = Math.max(...filteredNitro, 0);
+const avgCloro = filteredCloro.length ? filteredCloro.reduce((sum, value) => sum + value, 0) / filteredCloro.length : 0;
+const downtimeInRange = downtimeData
+.filter((comment) => {
+const itemDate = new Date(`${normalizeDateValue(comment.d)}T00:00:00`);
+const start = new Date(`${startDate}T00:00:00`);
+const end = new Date(`${endDate}T23:59:59`);
+const matchesBlock = bloco === 'all' || comment.u.endsWith(bloco);
+return matchesBlock && itemDate >= start && itemDate <= end;
+})
+.map((comment) => {
+    const note = downtimeComments.find((item) =>
+        normalizeDateValue(item.d) === normalizeDateValue(comment.d) &&
+        normalizeCsvHeader(item.u) === normalizeCsvHeader(comment.u)
+    );
+    return {
+        d: comment.d,
+        u: comment.u,
+        p: comment.p || '-',
+        h: comment.h || '-',
+        m: note?.m || comment.m || 'Sem detalhe'
+    };
+});
             const latestDowntime = [...downtimeInRange]
                 .sort((first, second) => new Date(normalizeDateValue(second.d)) - new Date(normalizeDateValue(first.d)))[0];
             const latestRefill = [...nitroData]
@@ -1253,6 +1282,18 @@ window.setIndispChartTvFonts = (isTv) => {
             };
             const reportYear = String(endDate || startDate || '').split('-')[0] || 'N/D';
             const reportPeriod = `${formatReportDate(startDate)} a ${formatReportDate(endDate)} de ${reportYear}`;
+            const cloroOutOfRangeCount = filteredCloro.filter((value) => value < 1 || value > 2).length;
+            const filteredObs7A = filteredLabels.map((label) => obsDw7A[diasAgosto.indexOf(label)] || '');
+            const filteredObs7B = filteredLabels.map((label) => obsDw7B[diasAgosto.indexOf(label)] || '');
+            const dwSeries7A = [
+                { label: 'DW 7A (m³)', values: filteredDw7A },
+                { label: 'Observação DW 7A', values: filteredObs7A, text: true }
+            ];
+            const dwSeries7B = [
+                { label: 'DW 7B (m³)', values: filteredDw7B },
+                { label: 'Observação DW 7B', values: filteredObs7B, text: true }
+            ];
+            const selectedDwSeries = bloco === '7A' ? dwSeries7A : bloco === '7B' ? dwSeries7B : [...dwSeries7A, ...dwSeries7B];
 
             const downtimeRowsHtml = downtimeInRange.length
                 ? downtimeInRange.map((item) => {
@@ -1274,7 +1315,9 @@ window.setIndispChartTvFonts = (isTv) => {
                     '<tr>',
                     '<td style="border:1px solid #ddd; padding:8px;">' + label + '</td>',
                     '<td style="border:1px solid #ddd; padding:8px;">' + Number(dw7A[idx] || 0).toFixed(1) + '</td>',
-                    '<td style="border:1px solid #ddd; padding:8px;">' + Number(dw7B[idx] || 0).toFixed(1) + '</td>',
+'<td style="border:1px solid #ddd; padding:8px;">' + (escapeHtml(obsDw7A[idx]) || '-') + '</td>',
+'<td style="border:1px solid #ddd; padding:8px;">' + Number(dw7B[idx] || 0).toFixed(1) + '</td>',
+'<td style="border:1px solid #ddd; padding:8px;">' + (escapeHtml(obsDw7B[idx]) || '-') + '</td>',
                     '<td style="border:1px solid #ddd; padding:8px;">' + Number(nitrogenNivel[idx] || 0).toFixed(1) + '</td>',
                     '<td style="border:1px solid #ddd; padding:8px;">' + Number(cloroPpm[idx] || 0).toFixed(2) + '</td>',
                     '<td style="border:1px solid #ddd; padding:8px;">' + (retestePpm[idx] === null || retestePpm[idx] === undefined ? '-' : Number(retestePpm[idx]).toFixed(2)) + '</td>',
@@ -1283,13 +1326,13 @@ window.setIndispChartTvFonts = (isTv) => {
             }).join('');
 
 const chartImageSpecs = [
-{ chart: window.dwChart, title: 'Consumo de Água (DW 7A / DW 7B)' },
-{ chart: window.nitrogenChart, title: 'Nível de Nitrogênio' },
-{ chart: window.chlorineChart, title: 'Monitoramento de Cloro' },
-{ chart: window.indispChart, title: 'Indisponibilidade das Utilidades (Horas)' }
+{ module: 'dw', chart: window.dwChart, title: 'Consumo de Água (DW 7A / DW 7B)' },
+{ module: 'nitrogenio', chart: window.nitrogenChart, title: 'Nível de Nitrogênio' },
+{ module: 'cloro', chart: window.chlorineChart, title: 'Monitoramento de Cloro' },
+{ module: 'indisponibilidade', chart: window.indispChart, title: 'Indisponibilidade das Utilidades (Horas)' }
 ];
 const chartsHtml = chartImageSpecs
-.filter((spec) => spec.chart && typeof spec.chart.toBase64Image === 'function')
+.filter((spec) => (selectedModule === 'all' || spec.module === selectedModule) && spec.chart && typeof spec.chart.toBase64Image === 'function')
 .map((spec) => ({ ...spec, image: spec.chart.toBase64Image('image/png', 1) }))
 .filter((spec) => spec.image && spec.image.length > 100)
 .map((spec) => {
@@ -1306,32 +1349,118 @@ const chartsSectionHtml = chartsHtml
 ? '<h3 class="report-section-title">Gráficos do Período</h3><div class="report-charts-grid">' + chartsHtml + '</div>'
 : '';
 
+const summaryItemsByModule = {
+    dw: [
+        ...(bloco !== '7B' ? ['<div><span>Maior consumo DW 7A</span><strong>' + maxDw7A.toFixed(1) + ' m³</strong></div>'] : []),
+        ...(bloco !== '7A' ? ['<div><span>Maior consumo DW 7B</span><strong>' + maxDw7B.toFixed(1) + ' m³</strong></div>'] : [])
+    ],
+    nitrogenio: [
+        '<div><span>Maior nível de nitrogênio</span><strong>' + maxNitro.toFixed(1) + ' pol</strong></div>',
+        '<div><span>Último reabastecimento</span><strong>' + (latestRefill ? latestRefill.r + ' pol em ' + latestRefill.d : 'Nenhum no período') + '</strong></div>'
+    ],
+    cloro: [
+        '<div><span>Média de cloro</span><strong>' + avgCloro.toFixed(2) + ' ppm</strong></div>',
+        '<div><span>Testes fora do limite (1,00–2,00 ppm)</span><strong>' + cloroOutOfRangeCount + '</strong></div>'
+    ],
+    availability: [
+        '<div><span>Utilidades disponíveis</span><strong>' + availabilityData.filter((item) => item.status === 'disponivel' && (bloco === 'all' || item.name.endsWith(bloco))).length + '/' + availabilityData.filter((item) => bloco === 'all' || item.name.endsWith(bloco)).length + '</strong></div>',
+        '<div><span>Disponibilidade no período</span><strong>' + availabilityValue + '</strong></div>',
+        '<div><span>Data de referência do status</span><strong>' + formatReportDate(endDate) + '</strong></div>'
+    ],
+    indisponibilidade: [
+        '<div><span>Última parada</span><strong>' + (latestDowntime ? latestDowntime.u + ' - ' + latestDowntime.h + ' em ' + latestDowntime.d : 'Nenhuma no período') + '</strong></div>',
+        '<div><span>Paradas registradas</span><strong>' + downtimeInRange.length + '</strong></div>',
+        '<div><span>Horas indisponíveis</span><strong>' + downtimeInRange.reduce((total, item) => total + parseNumberValue(item.h), 0).toFixed(1) + ' h</strong></div>'
+    ]
+};
+const allSummaryHtml = [
+    '<div><span>Maior consumo DW 7A</span><strong>' + maxDw7A.toFixed(1) + ' m³</strong></div>',
+    '<div><span>Maior consumo DW 7B</span><strong>' + maxDw7B.toFixed(1) + ' m³</strong></div>',
+    '<div><span>Maior nitrogênio</span><strong>' + maxNitro.toFixed(1) + ' pol</strong></div>',
+    '<div><span>Média de cloro</span><strong>' + avgCloro.toFixed(2) + ' ppm</strong></div>',
+    '<div><span>Disponibilidade diária</span><strong>' + availabilityValue + '</strong></div>',
+    '<div><span>Último reabastecimento</span><strong>' + (latestRefill ? latestRefill.r + ' pol em ' + latestRefill.d : 'Nenhum no período') + '</strong></div>',
+    '<div><span>Última parada</span><strong>' + (latestDowntime ? latestDowntime.u + ' - ' + latestDowntime.h + ' em ' + latestDowntime.d : 'Nenhuma no período') + '</strong></div>',
+    '<div><span>Paradas registradas</span><strong>' + downtimeInRange.length + '</strong></div>'
+].join('');
+const summaryHtml = '<h3 class="report-section-title">Resumo Operacional</h3><div class="report-summary-grid">' +
+    (selectedModule === 'all' ? allSummaryHtml : (summaryItemsByModule[selectedModule] || []).join('')) +
+    '</div>';
+
+const allDetailsHtml = [
+    '<h3 class="report-section-title">Disponibilidade das Utilidades em ' + formatReportDate(endDate) + '</h3>',
+    '<table class="report-table"><thead><tr><th>Utilidade</th><th>Status</th></tr></thead><tbody>',
+    availabilityData.filter((item) => bloco === 'all' || item.name.endsWith(bloco)).map((item) =>
+        '<tr><td>' + item.name + '</td><td>' + (item.status === 'disponivel' ? 'Disponível' : 'Indisponível') + '</td></tr>'
+    ).join(''),
+    '</tbody></table>',
+    '<h3 class="report-section-title">Paradas e Ocorrências</h3>',
+    '<table class="report-table">',
+    '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Utilidade</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Paradas</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Tempo indisponível</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Comentário</th></tr></thead>',
+    '<tbody>' + downtimeRowsHtml + '</tbody>',
+    '</table>',
+    '<h3 class="report-section-title">Dados do Período</h3>',
+    '<table class="report-table">',
+    '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7A</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Obs. DW 7A</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7B</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Obs. DW 7B</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Nitrogênio</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Cloro</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Reteste</th></tr></thead>',
+    '<tbody>' + rowsHtml + '</tbody>',
+    '</table>'
+].join('');
+const moduleDetailsHtml = {
+    availability: [
+        '<h3 class="report-section-title">Disponibilidade das Utilidades em ' + formatReportDate(endDate) + '</h3>',
+        '<table class="report-table"><thead><tr><th>Utilidade</th><th>Status</th></tr></thead><tbody>',
+        availabilityData.filter((item) => bloco === 'all' || item.name.endsWith(bloco)).map((item) =>
+            '<tr><td>' + item.name + '</td><td>' + (item.status === 'disponivel' ? 'Disponível' : 'Indisponível') + '</td></tr>'
+        ).join(''),
+        '</tbody></table>'
+    ].join(''),
+    dw: [
+        '<h3 class="report-section-title">Consumo DW no Período</h3>',
+        '<table class="report-table"><thead><tr><th>Data</th>' + selectedDwSeries.map((series) => '<th>' + series.label + '</th>').join('') + '</tr></thead><tbody>',
+        filteredLabels.map((label, filteredIndex) => {
+            return '<tr><td>' + label + '</td>' + selectedDwSeries.map((series) => '<td>' + (series.text ? (escapeHtml(series.values[filteredIndex]) || '-') : Number(series.values[filteredIndex] || 0).toFixed(1)) + '</td>').join('') + '</tr>';
+        }).join(''),
+        '</tbody></table>'
+    ].join(''),
+    nitrogenio: [
+        '<h3 class="report-section-title">Nível e Reabastecimentos de Nitrogênio no Período</h3>',
+        '<table class="report-table"><thead><tr><th>Data</th><th>Nível (pol)</th><th>Reabastecimento (pol)</th></tr></thead><tbody>',
+        filteredLabels.map((label) => {
+            const idx = diasAgosto.indexOf(label);
+            const date = normalizeDateValue(label);
+            const refill = nitroData.find((item) => normalizeDateValue(item.d) === date);
+            return '<tr><td>' + label + '</td><td>' + Number(nitrogenNivel[idx] || 0).toFixed(1) + '</td><td>' + (refill ? refill.r : '-') + '</td></tr>';
+        }).join(''),
+        '</tbody></table>'
+    ].join(''),
+    cloro: [
+        '<h3 class="report-section-title">Testes de Cloro e Limites de Controle no Período</h3>',
+        '<table class="report-table"><thead><tr><th>Data</th><th>Limite inferior (ppm)</th><th>Teste (ppm)</th><th>Limite superior (ppm)</th><th>Reteste (ppm)</th><th>Resultado</th></tr></thead><tbody>',
+        filteredLabels.map((label) => {
+            const idx = diasAgosto.indexOf(label);
+            const reteste = retestePpm[idx] === null || retestePpm[idx] === undefined ? '-' : Number(retestePpm[idx]).toFixed(2);
+            const result = cloroPpm[idx] < 1 || cloroPpm[idx] > 2 ? 'Fora do limite' : 'Dentro do limite';
+            return '<tr><td>' + label + '</td><td>1,00</td><td>' + Number(cloroPpm[idx] || 0).toFixed(2) + '</td><td>2,00</td><td>' + reteste + '</td><td>' + result + '</td></tr>';
+        }).join(''),
+        '</tbody></table>'
+    ].join(''),
+    indisponibilidade: [
+        '<h3 class="report-section-title">Paradas e Ocorrências</h3>',
+        '<table class="report-table"><thead><tr><th>Data</th><th>Utilidade</th><th>Paradas</th><th>Tempo indisponível</th><th>Comentário</th></tr></thead><tbody>',
+        downtimeRowsHtml,
+        '</tbody></table>'
+    ].join('')
+};
+const detailsHtml = selectedModule === 'all' ? allDetailsHtml : moduleDetailsHtml[selectedModule] || '';
+
 const reportContent = [
 '<div id="reportPrintArea">',
-                '<header class="report-header"><img src="logo_hemo.jpeg" alt="Hemobrás"><div><span>HEMOBRÁS</span><h1>Relatório de Utilidades</h1><p>Gestão de Utilidades</p></div></header>',
-                '<div class="report-meta"><div><strong>Período</strong><span>' + reportPeriod + '</span></div><div><strong>Bloco</strong><span>' + (bloco === 'all' ? 'Todos os blocos' : 'Bloco ' + bloco) + '</span></div></div>',
-                '<h3 class="report-section-title">Resumo Operacional</h3>',
-                '<div class="report-summary-grid">',
-                '<div><span>Maior consumo DW</span><strong>' + maxDw.toFixed(1) + ' m³</strong></div>',
-                '<div><span>Maior nitrogênio</span><strong>' + maxNitro.toFixed(1) + ' pol</strong></div>',
-                '<div><span>Média de cloro</span><strong>' + avgCloro.toFixed(2) + ' ppm</strong></div>',
-                '<div><span>Disponibilidade diária</span><strong>' + availabilityValue + '</strong></div>',
-                '<div><span>Último reabastecimento</span><strong>' + (latestRefill ? latestRefill.r + ' pol em ' + latestRefill.d : 'Nenhum no período') + '</strong></div>',
-                '<div><span>Última parada</span><strong>' + (latestDowntime ? latestDowntime.u + ' - ' + latestDowntime.h + ' em ' + latestDowntime.d : 'Nenhuma no período') + '</strong></div>',
-                '<div><span>Paradas registradas</span><strong>' + downtimeInRange.length + '</strong></div>',
-                '</div>',
-                chartsSectionHtml,
-                '<h3 class="report-section-title">Paradas e Ocorrências</h3>',
-                '<table class="report-table">',
-                '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Utilidade</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Paradas</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Tempo indisponível</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Comentário</th></tr></thead>',
-                '<tbody>' + downtimeRowsHtml + '</tbody>',
-                '</table>',
-                '<h3 class="report-section-title">Dados do Período</h3>',
-                '<table class="report-table">',
-                '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7A</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7B</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Nitrogênio</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Cloro</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Reteste</th></tr></thead>',
-                '<tbody>' + rowsHtml + '</tbody>',
-                '</table>',
-                '</div>'
+'<header class="report-header"><img src="logo_hemo.jpeg" alt="Hemobrás"><div><span>HEMOBRÁS</span><h1>Relatório de Utilidades</h1><p>' + moduleTitle + '</p></div></header>',
+'<div class="report-meta"><div><strong>Período</strong><span>' + reportPeriod + '</span></div><div><strong>Bloco</strong><span>' + (bloco === 'all' ? 'Todos os blocos' : 'Bloco ' + bloco) + '</span></div><div><strong>Módulo</strong><span>' + moduleTitle + '</span></div></div>',
+summaryHtml,
+chartsSectionHtml,
+detailsHtml,
+'</div>'
             ].join('');
 
             const existing = document.getElementById('reportPrintArea');

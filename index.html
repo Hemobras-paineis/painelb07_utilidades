@@ -76,6 +76,17 @@
                         <option value="7B">Bloco 7B</option>
                     </select>
                 </div>
+                <div class="filter-group">
+                    <label for="reportModuleFilter">Módulo do relatório:</label>
+                    <select id="reportModuleFilter">
+                        <option value="all">Todos os módulos</option>
+                        <option value="availability">Disponibilidade Diária</option>
+                        <option value="dw">DW</option>
+                        <option value="nitrogenio">Nitrogênio</option>
+                        <option value="indisponibilidade">Indisponibilidade das Utilidades</option>
+                        <option value="cloro">Teste de Cloro</option>
+                    </select>
+                </div>
                 <button class="btn-filter"><i class="fas fa-filter"></i> Aplicar</button>
                 <button id="reloadCsvData" class="btn-filter btn-reload"><i class="fas fa-sync-alt"></i> Atualizar Dados</button>
             </div>
@@ -210,7 +221,7 @@
                             <div class="table-header-custom"><i class="fas fa-tint"></i> <h3>Tabela DW</h3></div>
                             <div class="table-responsive">
                                 <table>
-                                    <thead><tr><th>Data</th><th>Consumo DW 7A (m³)</th><th>Consumo DW 7B (m³)</th></tr></thead>
+                                    <thead><tr><th>Data</th><th>Consumo DW 7A (m³)</th><th>Observação DW 7A</th><th>Consumo DW 7B (m³)</th><th>Observação DW 7B</th></tr></thead>
                                     <tbody id="dwTableBody"></tbody>
                                 </table>
                             </div>

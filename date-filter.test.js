@@ -23,4 +23,14 @@ assert.deepStrictEqual(parsed.dw7B.slice(0, 2), [29.7, 14.9]);
 assert.deepStrictEqual(parsed.nitrogenNivel.slice(0, 2), [143.8, 137.2]);
 assert.deepStrictEqual(parsed.cloroPpm.slice(0, 2), [1.31, 1.53]);
 
+const obsCsv = [
+  'DATA,DW7B,Obervação,DW7A,Observação,NITROGENIO',
+  '01/08/2026,"29,7",obs B,"167,3",obs A,"143,8"',
+  '02/08/2026,"14,9",,"158,2",,"137,2"'
+].join('\n');
+const parsedObs = buildDataStateFromCsv(obsCsv);
+assert.deepStrictEqual(parsedObs.obsDw7A, ['obs A', '']);
+assert.deepStrictEqual(parsedObs.obsDw7B, ['obs B', '']);
+assert.deepStrictEqual(parsedObs.dw7A, [167.3, 158.2]);
+
 console.log('date-filter.test.js: OK');
