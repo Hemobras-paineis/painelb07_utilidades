@@ -62,19 +62,11 @@
             <div class="filters-bar tv-hide" id="filtersBar">
                 <div class="filter-group">
                     <label for="dateStart">De:</label>
-                    <input type="date" id="dateStart" value="2026-08-01">
+                    <input type="date" id="dateStart">
                 </div>
                 <div class="filter-group">
                     <label for="dateEnd">Até:</label>
-                    <input type="date" id="dateEnd" value="2026-08-31">
-                </div>
-                <div class="filter-group">
-                    <label for="blocoFilter">Bloco:</label>
-                    <select id="blocoFilter">
-                        <option value="all">Todos os Blocos</option>
-                        <option value="7A">Bloco 7A</option>
-                        <option value="7B">Bloco 7B</option>
-                    </select>
+                    <input type="date" id="dateEnd">
                 </div>
                 <div class="filter-group">
                     <label for="reportModuleFilter">Módulo do relatório:</label>
@@ -83,7 +75,8 @@
                         <div class="multi-select-menu">
                             <label><input type="checkbox" value="all" checked> Todos os módulos</label>
                             <label><input type="checkbox" value="availability"> Disponibilidade Diária</label>
-                            <label><input type="checkbox" value="dw"> DW</label>
+                            <label><input type="checkbox" value="dw7a"> DW 7A</label>
+                            <label><input type="checkbox" value="dw7b"> DW 7B</label>
                             <label><input type="checkbox" value="nitrogenio"> Nitrogênio</label>
                             <label><input type="checkbox" value="indisponibilidade"> Indisponibilidade das Utilidades</label>
                             <label><input type="checkbox" value="cloro"> Teste de Cloro</label>

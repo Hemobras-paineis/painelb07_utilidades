@@ -1,4 +1,5 @@
 const DEFAULT_YEAR = 2026;
+const DASHBOARD_RECENT_DAYS = 10;
 const AUTO_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 // Register ChartJS Datalabels plugin
@@ -1247,8 +1248,7 @@ Object.entries(boilerConsumption).forEach(([key, element]) => {
 
         const avgAvailability = document.getElementById('avgAvailability');
         if (avgAvailability) {
-    const startDate = document.getElementById('dateStart')?.value;
-    const endDate = document.getElementById('dateEnd')?.value;
+    const { start: startDate, end: endDate } = getEffectiveDateRange();
     const periodStart = new Date(`${startDate}T00:00:00`);
     const periodEnd = new Date(`${endDate}T23:59:59`);
     const utilitiesInBlock = availabilityData.filter((item) => selectedBlock === 'all' || item.name.endsWith(selectedBlock));
@@ -1291,8 +1291,9 @@ dwTbody.innerHTML = labels.map((dia, i) => dwRowHtml(dia, indexes[i])).join('');
         if (nitroTbody) {
             const selectedNitro = nitroData.filter((item) => {
                 const date = new Date(normalizeDateValue(item.d).replace(/-/g, '/'));
-                const startDate = new Date(`${document.getElementById('dateStart').value}T00:00:00`);
-                const endDate = new Date(`${document.getElementById('dateEnd').value}T23:59:59`);
+const { start: rangeStartValue, end: rangeEndValue } = getEffectiveDateRange();
+const startDate = new Date(`${rangeStartValue}T00:00:00`);
+const endDate = new Date(`${rangeEndValue}T23:59:59`);
                 return date >= startDate && date <= endDate;
             });
 
@@ -1317,6 +1318,16 @@ availabilityCommentsTbody.innerHTML = (occurrences.length ? occurrences : [{ d: 
                 .join('');
         }
     }
+
+function getEffectiveDateRange() {
+const startValue = document.getElementById('dateStart')?.value;
+const endValue = document.getElementById('dateEnd')?.value;
+const dataDates = diasAgosto.map((label) => normalizeDateValue(label)).filter(Boolean).sort();
+return {
+    start: startValue || dataDates[0] || '',
+    end: endValue || dataDates[dataDates.length - 1] || ''
+};
+}
 
 function getFilteredDowntimeData() {
 const dateStartValue = document.getElementById('dateStart')?.value;
@@ -1367,29 +1378,20 @@ return downtimeData.filter((item) => {
             return;
         }
 
-        const today = new Date();
-        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
-        const currentDay = today.toISOString().slice(0, 10);
+if (dateStart.value && dateEnd.value && dateStart.value > dateEnd.value) {
+    const previousStart = dateStart.value;
+    dateStart.value = dateEnd.value;
+    dateEnd.value = previousStart;
+}
 
-        if (!dateStart.value) {
-            dateStart.value = currentMonthStart;
-        }
-
-        if (!dateEnd.value) {
-            dateEnd.value = currentDay;
-        }
-
-        if (dateStart.value && dateEnd.value && dateStart.value > dateEnd.value) {
-            const previousStart = dateStart.value;
-            dateStart.value = dateEnd.value;
-            dateEnd.value = previousStart;
-        }
-
-        const filtered = filterDateRange(diasAgosto, dateStart.value, dateEnd.value, DEFAULT_YEAR);
-        const labels = filtered.labels;
-        const indexes = filtered.indexes;
-        const selectedBlock = blocoFilter ? blocoFilter.value : 'all';
-syncAvailabilityForDate(dateEnd.value);
+const filtered = filterDateRange(diasAgosto, dateStart.value, dateEnd.value, DEFAULT_YEAR);
+const labels = filtered.labels;
+const indexes = filtered.indexes;
+const noDateFilter =   !dateStart.value || !dateEnd.value;
+const recentIndexes = noDateFilter ? indexes.slice(-DASHBOARD_RECENT_DAYS) : indexes;
+const recentLabels = recentIndexes.map((index) => diasAgosto[index]);
+const selectedBlock = blocoFilter ? blocoFilter.value : 'all';
+syncAvailabilityForDate(dateEnd.value || (diasAgosto.length ? diasAgosto[diasAgosto.length - 1] : ''));
 renderAvailabilityView();
 renderExtraColumnsView();
 
@@ -1415,32 +1417,30 @@ renderExtraColumnsView();
         const filteredCloro = blockCloro;
     const filteredReteste = blockReteste;
 
-        const dwChart = window.dwChart;
-        if (dwChart) {
-            dwChart.data.labels = labels;
-            dwChart.data.datasets[0].data = filteredDw7A;
-            dwChart.data.datasets[1].data = filteredDw7B;
-            dwChart.data.datasets[0].label = selectedBlock === 'all' ? 'DW 7A (m³)' : `DW 7A (${selectedBlock}) (m³)`;
-            dwChart.data.datasets[1].label = selectedBlock === 'all' ? 'DW 7B (m³)' : `DW 7B (${selectedBlock}) (m³)`;
-            dwChart.update();
-        }
+const dwChart = window.dwChart;
+if (dwChart) {
+dwChart.data.labels = recentLabels;
+dwChart.data.datasets[0].data = recentIndexes.map((index) => dw7A[index]);
+dwChart.data.datasets[1].data = recentIndexes.map((index) => dw7B[index]);
+dwChart.update();
+}
 
-        const nitrogenChart = window.nitrogenChart;
-        if (nitrogenChart) {
-            nitrogenChart.data.labels = labels;
-            nitrogenChart.data.datasets[0].data = filteredNitrogen;
-            nitrogenChart.update();
-        }
+const nitrogenChart = window.nitrogenChart;
+if (nitrogenChart) {
+nitrogenChart.data.labels = recentLabels;
+nitrogenChart.data.datasets[0].data = recentIndexes.map((index) => nitrogenNivel[index]);
+nitrogenChart.update();
+}
 
-        const chlorineChart = window.chlorineChart;
-        if (chlorineChart) {
-            chlorineChart.data.labels = labels;
-            chlorineChart.data.datasets[0].data = filteredCloro;
-            chlorineChart.data.datasets[1].data = filteredReteste;
-            chlorineChart.data.datasets[2].data = labels.map(() => 1);
-            chlorineChart.data.datasets[3].data = labels.map(() => 2);
-            chlorineChart.update();
-        }
+const chlorineChart = window.chlorineChart;
+if (chlorineChart) {
+chlorineChart.data.labels = recentLabels;
+chlorineChart.data.datasets[0].data = recentIndexes.map((index) => cloroPpm[index]);
+chlorineChart.data.datasets[1].data = recentIndexes.map((index) => retestePpm[index]);
+chlorineChart.data.datasets[2].data = recentLabels.map(() => 1);
+chlorineChart.data.datasets[3].data = recentLabels.map(() => 2);
+chlorineChart.update();
+}
 
         const dwChartTv = window.dwChartTv;
         if (dwChartTv) {
@@ -1585,15 +1585,15 @@ initReportModuleFilter();
 const generatePdfButton = document.getElementById('btnGeneratePdf');
     if (generatePdfButton) {
         generatePdfButton.addEventListener('click', () => {
-            const startDate = document.getElementById('dateStart')?.value || '';
-            const endDate = document.getElementById('dateEnd')?.value || '';
+const { start: startDate, end: endDate } = getEffectiveDateRange();
             const bloco = document.getElementById('blocoFilter')?.value || 'all';
 const selectedModules = getSelectedReportModules();
 const isAllModules = selectedModules.includes('all');
 const moduleTitles = {
     all: 'Todos os módulos',
     availability: 'Disponibilidade Diária',
-    dw: 'DW',
+    dw7a: 'DW 7A',
+    dw7b: 'DW 7B',
     nitrogenio: 'Nitrogênio',
     indisponibilidade: 'Indisponibilidade das Utilidades',
     cloro: 'Teste de Cloro'
@@ -1685,7 +1685,14 @@ return matchesBlock && itemDate >= start && itemDate <= end;
                 { label: 'DW 7B (m³)', values: filteredDw7B },
                 { label: 'Observação DW 7B', values: filteredObs7B, text: true }
             ];
-            const selectedDwSeries = bloco === '7A' ? dwSeries7A : bloco === '7B' ? dwSeries7B : [...dwSeries7A, ...dwSeries7B];
+            const buildDwTable = (title, series) => [
+                '<h3 class="report-section-title">' + title + '</h3>',
+                '<table class="report-table"><thead><tr><th>Data</th>' + series.map((s) => '<th>' + s.label + '</th>').join('') + '</tr></thead><tbody>',
+                filteredLabels.map((label, filteredIndex) => {
+                    return '<tr><td>' + label + '</td>' + series.map((s) => '<td>' + (s.text ? (escapeHtml(s.values[filteredIndex]) || '-') : Number(s.values[filteredIndex] || 0).toFixed(1)) + '</td>').join('') + '</tr>';
+                }).join(''),
+                '</tbody></table>'
+            ].join('');
 
             const downtimeRowsHtml = downtimeInRange.length
                 ? downtimeInRange.map((item) => {
@@ -1718,14 +1725,14 @@ return matchesBlock && itemDate >= start && itemDate <= end;
             }).join('');
 
 const chartImageSpecs = [
-{ module: 'dw', chart: window.dwChart, title: 'Consumo de Água (DW 7A / DW 7B)' },
+{ module: ['dw7a', 'dw7b'], chart: window.dwChart, title: 'Consumo de Água (DW 7A / DW 7B)' },
 { module: 'nitrogenio', chart: window.nitrogenChart, title: 'Nível de Nitrogênio' },
 { module: 'cloro', chart: window.chlorineChart, title: 'Monitoramento de Cloro' },
 { module: 'indisponibilidade', chart: window.indispChart, title: 'Indisponibilidade das Utilidades (Horas)' },
 ...extraCharts.map((item) => ({ module: 'extra:' + item.key, chart: item.chart, title: item.chart.data.datasets[0].label }))
 ];
 const chartsHtml = chartImageSpecs
-.filter((spec) => (isAllModules || selectedModules.includes(spec.module)) && spec.chart && typeof spec.chart.toBase64Image === 'function')
+.filter((spec) => (isAllModules || [].concat(spec.module).some((key) => selectedModules.includes(key))) && spec.chart && typeof spec.chart.toBase64Image === 'function')
 .map((spec) => ({ ...spec, image: spec.chart.toBase64Image('image/png', 1) }))
 .filter((spec) => spec.image && spec.image.length > 100)
 .map((spec) => {
@@ -1743,10 +1750,8 @@ const chartsSectionHtml = chartsHtml
 : '';
 
 const summaryItemsByModule = {
-    dw: [
-        ...(bloco !== '7B' ? ['<div><span>Maior consumo DW 7A</span><strong>' + maxDw7A.toFixed(1) + ' m³</strong></div>'] : []),
-        ...(bloco !== '7A' ? ['<div><span>Maior consumo DW 7B</span><strong>' + maxDw7B.toFixed(1) + ' m³</strong></div>'] : [])
-    ],
+    dw7a: ['<div><span>Maior consumo DW 7A</span><strong>' + maxDw7A.toFixed(1) + ' m³</strong></div>'],
+    dw7b: ['<div><span>Maior consumo DW 7B</span><strong>' + maxDw7B.toFixed(1) + ' m³</strong></div>'],
     nitrogenio: [
         '<div><span>Maior nível de nitrogênio</span><strong>' + maxNitro.toFixed(1) + ' pol</strong></div>',
         '<div><span>Último reabastecimento</span><strong>' + (latestRefill ? latestRefill.r + ' pol em ' + latestRefill.d : 'Nenhum no período') + '</strong></div>'
@@ -1808,14 +1813,8 @@ const moduleDetailsHtml = {
         ).join(''),
         '</tbody></table>'
     ].join(''),
-    dw: [
-        '<h3 class="report-section-title">Consumo DW no Período</h3>',
-        '<table class="report-table"><thead><tr><th>Data</th>' + selectedDwSeries.map((series) => '<th>' + series.label + '</th>').join('') + '</tr></thead><tbody>',
-        filteredLabels.map((label, filteredIndex) => {
-            return '<tr><td>' + label + '</td>' + selectedDwSeries.map((series) => '<td>' + (series.text ? (escapeHtml(series.values[filteredIndex]) || '-') : Number(series.values[filteredIndex] || 0).toFixed(1)) + '</td>').join('') + '</tr>';
-        }).join(''),
-        '</tbody></table>'
-    ].join(''),
+    dw7a: buildDwTable('Consumo DW 7A no Período', dwSeries7A),
+    dw7b: buildDwTable('Consumo DW 7B no Período', dwSeries7B),
     nitrogenio: [
         '<h3 class="report-section-title">Nível e Reabastecimentos de Nitrogênio no Período</h3>',
         '<table class="report-table"><thead><tr><th>Data</th><th>Nível (pol)</th><th>Reabastecimento (pol)</th></tr></thead><tbody>',
@@ -1869,18 +1868,9 @@ detailsHtml,
 
     populateBaseDataTable();
 
-    const dateStart = document.getElementById('dateStart');
-    const dateEnd = document.getElementById('dateEnd');
-    const blocoFilter = document.getElementById('blocoFilter');
-const DEFAULT_VIEW_DAYS = 10;
-if (dateStart && dateEnd) {
-    const today = new Date();
-    const rangeStart = new Date(today);
-    rangeStart.setDate(rangeStart.getDate() - (DEFAULT_VIEW_DAYS - 1));
-    const toLocalIso = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    dateEnd.value = toLocalIso(today);
-    dateStart.value = toLocalIso(rangeStart);
-}
+const dateStart = document.getElementById('dateStart');
+const dateEnd = document.getElementById('dateEnd');
+const blocoFilter = document.getElementById('blocoFilter');
 if (dateStart) dateStart.addEventListener('change', applyDateFilters);
     if (dateEnd) dateEnd.addEventListener('change', applyDateFilters);
     if (blocoFilter) blocoFilter.addEventListener('change', applyDateFilters);
