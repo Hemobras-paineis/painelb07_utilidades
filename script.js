@@ -955,15 +955,18 @@ function renderExtraColumnsView() {
         container.appendChild(view);
 
         const canvas = view.querySelector('canvas');
+        const isGas = /gas ?natural/.test(normalizeCsvHeader(col.label).replace(/[^a-z ]/g, ' ')) || /gasnatural/.test(normalizeCsvHeader(col.label));
         if (canvas && typeof Chart !== 'undefined') {
             const color = palette[i % palette.length];
+            const numbers = visibleRows.map(row => parseNumberValue(row.values[col.key]));
+            if (isGas) canvas.closest('.chart-wrapper').style.minHeight = '520px';
             extraCharts.push({ key: col.key, chart: new Chart(canvas, {
                 type: 'line',
                 data: {
                     labels: visibleRows.map(row => row.date),
                     datasets: [{
                         label: col.label,
-                        data: visibleRows.map(row => parseNumberValue(row.values[col.key])),
+                        data: numbers,
                         borderColor: color,
                         backgroundColor: color,
                         tension: 0.3
@@ -972,11 +975,13 @@ function renderExtraColumnsView() {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    layout: { padding: isGas ? { top: 70, right: 40 } : 0 },
                     plugins: {
                         legend: { display: false },
                         datalabels: {
                             color: '#34495e',
-                            font: { weight: 'bold', size: 10 },
+                            font: { weight: 'bold', size: isGas ? 16 : 10 },
+                            textAlign: 'center',
                             anchor: 'end',
                             align: 'top',
                             offset: 4,
@@ -987,8 +992,10 @@ function renderExtraColumnsView() {
                         }
                     },
                     scales: {
+                        x: { ticks: { font: { size: isGas ? 16 : 12 } } },
                         y: {
-                            title: { display: Boolean(col.unit), text: col.unit }
+                            ticks: { font: { size: isGas ? 16 : 12 } },
+                            title: { display: Boolean(col.unit), text: col.unit, font: { size: isGas ? 16 : 12 } }
                         }
                     }
                 }
