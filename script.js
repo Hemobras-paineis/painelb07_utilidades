@@ -289,6 +289,51 @@ function buildDowntimeStateFromCsv(csvText) {
     }).filter(Boolean);
 }
 
+// Detecta colunas novas da planilha (não mapeadas nos módulos existentes) para exibição automática.
+const KNOWN_COLUMN_PATTERN = /^(data|date|dia|datas|dw7|dw7a|dw7b|dwa|dwb|dw7value|nitrogenio\w*|n2|cloro\w*|chlor|testecloro\w*|testedecloro\w*|reteste\w*|testedereteste|reabastecimento|refill|reposicao|utilidade|paradas|tempoindisponivel\w*|comentario\w*)\d*$/;
+
+function extractExtraColumns(csvText) {
+    const lines = String(csvText || '').trim().split(/\r?\n/).filter(line => line.trim());
+    if (lines.length < 2) return { columns: [], rows: [] };
+
+    const labels = splitCsvLine(lines[0]);
+    const norm = labels.map(normalizeCsvHeader);
+    const dateIndexes = [];
+    norm.forEach((header, index) => { if (/^(data|date|dia|datas)$/.test(header)) dateIndexes.push(index); });
+    if (!dateIndexes.length) return { columns: [], rows: [] };
+
+    const extras = [];
+    norm.forEach((header, index) => {
+        if (!header || dateIndexes.includes(index)) return;
+        const isDwObservation = /^ob[a-z]*rvacao\d*$/.test(header) && /^dw7[ab]$/.test(norm[index - 1] || '');
+        if (isDwObservation || KNOWN_COLUMN_PATTERN.test(header)) return;
+        const dateIndex = [...dateIndexes].reverse().find(di => di < index) ?? dateIndexes[0];
+        extras.push({ index, dateIndex, label: labels[index].trim() || `Coluna ${index + 1}`, key: `${header}_${index}` });
+    });
+    if (!extras.length) return { columns: [], rows: [] };
+
+    const byDate = new Map();
+    const parsedLines = lines.slice(1).map(splitCsvLine);
+    extras.forEach((col) => {
+        let numericCount = 0;
+        let filledCount = 0;
+        parsedLines.forEach((values) => {
+            const date = (values[col.dateIndex] || '').trim();
+            const raw = (values[col.index] || '').trim();
+            if (!date || !raw) return;
+            filledCount += 1;
+            if (/^-?[\d.,\s]+[A-Za-z%³²]*$/.test(raw) && /\d/.test(raw)) numericCount += 1;
+            if (!byDate.has(date)) byDate.set(date, {});
+            byDate.get(date)[col.key] = raw;
+        });
+        col.numeric = filledCount > 0 && numericCount === filledCount;
+    });
+
+    const columns = extras.filter(col => parsedLines.some(values => (values[col.index] || '').trim()));
+    const rows = [...byDate.entries()].map(([date, values]) => ({ date, values }));
+    return { columns, rows };
+}
+
 const GOOGLE_SHEETS_CSV_URL = 'https://docs.google.com/spreadsheets/d/1SmjrouY2fg_kFRSYsu6kiptQpHJ2hbIIJR9zHWP1x9Q/export?format=csv&gid=0';
 const DATA_SOURCE_URL = GOOGLE_SHEETS_CSV_URL;
 const DATA_SOURCE_CANDIDATES = [DATA_SOURCE_URL];
@@ -349,16 +394,13 @@ if (typeof document !== 'undefined') {
         document.getElementById(targetId).classList.add('active');
     }
 
-    document.querySelectorAll('.sidebar-nav a').forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const targetId = e.currentTarget.getAttribute('data-target');
-            if(targetId) {
-                openView(targetId, e.currentTarget.innerText);
-                setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
-            }
-        });
-    });
+document.querySelector('.sidebar-nav').addEventListener('click', (e) => {
+const link = e.target.closest('a[data-target]');
+if (!link) return;
+e.preventDefault();
+openView(link.getAttribute('data-target'), link.innerText.trim());
+setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+});
 
 // --- Recolher/Expandir Menu Lateral ---
 const btnSidebarToggle = document.getElementById('btnSidebarToggle');
@@ -390,12 +432,46 @@ setTimeout(() => window.dispatchEvent(new Event('resize')), 450);
     let currentViewIndex = 0;
     // Views que contém os gráficos
     const tvViews = [
-{ id: 'view-disponibilidade', title: 'Disponibilidade Diária' },
-        { id: 'view-indisponibilidade', title: 'Indisponibilidade das Utilidades' },
-        { id: 'view-nitrogenio', title: 'Nitrogênio' },
-        { id: 'view-dw', title: 'DW' },
-        { id: 'view-cloro', title: 'Teste de Cloro' }
-    ];
+    { id: 'view-disponibilidade', title: 'Disponibilidade Diária' },
+    { id: 'view-indisponibilidade', title: 'Indisponibilidade das Utilidades' },
+    { id: 'view-nitrogenio', title: 'Nitrogênio' },
+    { id: 'view-dw', title: 'DW' },
+    { id: 'view-cloro', title: 'Teste de Cloro' }
+];
+const getExtraViewId = (col) => `view-extra-${col.key}`;
+const EXTRA_ICON_RULES = [
+   [/temperatura|temp\b|calor/, 'fa-temperature-high'],
+   [/pressao|pressure|bar\b|psi/, 'fa-tachometer-alt'],
+   [/vapor|caldeira/, 'fa-cloud'],
+   [/ar ?comp|compress/, 'fa-wind'],
+   [/cw|torre|chiller|agua ?gelada|hvac|clima/, 'fa-snowflake'],
+   [/wfi|sfi|agua|dw|vazao|consumo|litro|m3/, 'fa-tint'],
+   [/nitrog|n2|gas|co2|oxig/, 'fa-flask'],
+   [/cloro|reteste|ph\b|condutiv|toc|quimic|analise/, 'fa-vial'],
+   [/energia|eletric|kwh|tensao|corrente|gerador|potencia/, 'fa-bolt'],
+   [/parada|falha|alarme|indispon|defeito|manutenc/, 'fa-exclamation-triangle'],
+   [/status|situacao|disponib/, 'fa-check-circle'],
+   [/obs|coment|nota|detalhe/, 'fa-comment-alt'],
+   [/resp|operador|turno|equipe|tecnico/, 'fa-user'],
+   [/umidade|humid/, 'fa-water'],
+   [/nivel|tanque|volume|estoque/, 'fa-fill-drip']
+];
+const GN_ICON_HTML = '<span class="icon-gn" style="display:inline-flex;align-items:center;gap:3px;vertical-align:middle;" title="Gás Natural"><svg width="18" height="12" viewBox="0 0 18 12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="12" height="6" rx="1"/><rect x="0.8" y="1.5" width="2.4" height="9" rx="0.5" fill="currentColor"/><rect x="14.8" y="1.5" width="2.4" height="9" rx="0.5" fill="currentColor"/></svg><b style="font-size:0.7em;letter-spacing:0.3px;">GN</b></span>';
+const getExtraIconHtml = (col) => {
+    const text = String(col.label || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (/gas ?natural|\bgn\b/.test(text)) return GN_ICON_HTML;
+    return `<i class="fas ${getExtraIcon(col)}"></i>`;
+};
+const getExtraIcon = (col) => {
+   const text = String(col.label || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+   const match = EXTRA_ICON_RULES.find(([pattern]) => pattern.test(text));
+   if (match) return match[1];
+   return col.numeric ? 'fa-chart-line' : 'fa-table-columns';
+};
+const getTvViews = () => [
+   ...tvViews,
+   ...extraData.columns.filter(col => col.numeric).map(col => ({ id: getExtraViewId(col), title: col.label }))
+];
     const TIME_PER_SLIDE = 20000;
 const TV_DAYS_RANGE = 7; // Dia atual + 6 dias anteriores
 const btnTvMode = document.getElementById('btnTvMode');
@@ -475,13 +551,15 @@ document.addEventListener('keydown', (event) => {
 
     function startTvCarousel() {
         currentViewIndex = 0;
-        openView(tvViews[currentViewIndex].id, tvViews[currentViewIndex].title);
-        animateTvProgress();
-        setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
+const firstView = getTvViews()[0];
+openView(firstView.id, firstView.title);
+animateTvProgress();
+setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
 
-        tvIntervalId = setInterval(() => {
-            currentViewIndex = (currentViewIndex + 1) % tvViews.length;
-            openView(tvViews[currentViewIndex].id, tvViews[currentViewIndex].title);
+tvIntervalId = setInterval(() => {
+const views = getTvViews();
+currentViewIndex = (currentViewIndex + 1) % views.length;
+openView(views[currentViewIndex].id, views[currentViewIndex].title);
             animateTvProgress();
             setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
         }, TIME_PER_SLIDE);
@@ -515,6 +593,8 @@ document.addEventListener('keydown', (event) => {
     let nitrogenNivel = [...baseDataState.nitrogenNivel];
     let cloroPpm = [...baseDataState.cloroPpm];
     let retestePpm = [...baseDataState.retestePpm];
+    let extraData = { columns: [], rows: [] };
+    const extraCharts = [];
     let nitroData = [{d: '05/08/2026', n: '116,3', r: '280,2 pol'}, {d: '26/08/2026', n: '218,9', r: 'pol'}];
     const downtimeData = [
         {d: '08/08/2026', u: 'DW 7A', p: '1', h: '2.5h'},
@@ -610,6 +690,7 @@ function syncAvailabilityForDate(referenceDate) {
                 cloroPpm = [...parsed.cloroPpm];
                 retestePpm = [...parsed.retestePpm];
                 nitroData = [...parsed.nitroData];
+                extraData = extractExtraColumns(csvText);
 
 const downtimeFromSource = buildDowntimeStateFromCsv(csvText);
 if (downtimeFromSource.length) {
@@ -640,6 +721,7 @@ downtimeComments.push(...downtimeFromSource);
         nitrogenNivel = [...defaultData.nitrogenNivel];
         cloroPpm = [...defaultData.cloroPpm];
     retestePpm = [...defaultData.retestePpm];
+        extraData = { columns: [], rows: [] };
                 syncAvailabilityForDate(document.getElementById('dateEnd')?.value);
                 renderAvailabilityView();
         updateDataSourceStatus('Google Sheets indisponível; exibindo dados locais temporariamente');
@@ -739,7 +821,99 @@ downtimeComments.push(...downtimeFromSource);
         });
     }
 
-    function populateBaseDataTable() {
+function renderExtraColumnsView() {
+    const navList = document.querySelector('.sidebar-nav ul');
+    const container = document.getElementById('extraViewsContainer');
+    const reportSelect = document.getElementById('reportModuleFilter');
+    const { columns, rows } = extraData;
+    if (!navList || !container) return;
+
+    const activeBefore = container.querySelector('.view-section.active')?.id;
+    extraCharts.splice(0).forEach(item => item.chart.destroy());
+    container.innerHTML = '';
+    navList.querySelectorAll('.extra-nav-item').forEach(li => li.remove());
+    reportSelect?.querySelectorAll('option[data-extra]').forEach(option => option.remove());
+
+    const reportValue = reportSelect?.value;
+    if (reportSelect && reportValue && reportValue.startsWith('extra:') && !columns.some(col => `extra:${col.key}` === reportValue)) {
+        reportSelect.value = 'all';
+    }
+    if (!columns.length) {
+        if (activeBefore) openView('view-dashboard', 'Dashboard Geral');
+        return;
+    }
+
+    const dateStart = document.getElementById('dateStart')?.value;
+    const dateEnd = document.getElementById('dateEnd')?.value;
+    const filtered = filterDateRange(rows.map(row => row.date), dateStart, dateEnd, DEFAULT_YEAR);
+    const palette = ['#2980b9', '#27ae60', '#e67e22', '#8e44ad', '#c0392b', '#16a085'];
+
+    columns.forEach((col, i) => {
+        const viewId = getExtraViewId(col);
+        const li = document.createElement('li');
+        li.className = 'extra-nav-item';
+        li.innerHTML = `<a href="#" data-target="${viewId}">${getExtraIconHtml(col)} ${escapeHtml(col.label)}</a>`;
+        navList.appendChild(li);
+
+        if (reportSelect) {
+            const option = document.createElement('option');
+            option.value = `extra:${col.key}`;
+            option.textContent = col.label;
+            option.dataset.extra = '1';
+            reportSelect.appendChild(option);
+        }
+
+        const visibleRows = filtered.indexes.map(index => rows[index]).filter(row => row.values[col.key] !== undefined);
+        const view = document.createElement('div');
+        view.id = viewId;
+        view.className = 'view-section';
+        view.innerHTML = `<div class="module-container">
+            ${col.numeric ? `<div class="chart-card tv-chart"><h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper"><canvas></canvas></div></div>` : ''}
+            <section class="reference-section tv-hide"><div class="table-card">
+                <div class="table-header-custom">${getExtraIconHtml(col)} <h3>${escapeHtml(col.label)}</h3></div>
+                <div class="table-responsive"><table>
+                    <thead><tr><th>Data</th><th>${escapeHtml(col.label)}</th></tr></thead>
+                    <tbody>${visibleRows.map(row => {
+                        const date = String(row.date).split('/').length > 2 || row.date.includes('-') ? row.date : `${row.date}/${DEFAULT_YEAR}`;
+                        return `<tr><td><strong>${escapeHtml(date)}</strong></td><td>${escapeHtml(row.values[col.key]) || '-'}</td></tr>`;
+                    }).join('')}</tbody>
+                </table></div>
+            </div></section>
+        </div>`;
+        container.appendChild(view);
+
+        const canvas = view.querySelector('canvas');
+        if (canvas && typeof Chart !== 'undefined') {
+            const color = palette[i % palette.length];
+            extraCharts.push({ key: col.key, chart: new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: visibleRows.map(row => row.date),
+                    datasets: [{
+                        label: col.label,
+                        data: visibleRows.map(row => parseNumberValue(row.values[col.key])),
+                        borderColor: color,
+                        backgroundColor: color,
+                        tension: 0.3
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { datalabels: { display: false } } }
+            }) });
+        }
+    });
+
+    if (activeBefore) {
+        const stillExists = document.getElementById(activeBefore);
+        if (stillExists) {
+            const col = columns.find(c => getExtraViewId(c) === activeBefore);
+            openView(activeBefore, col?.label);
+        } else {
+            openView('view-dashboard', 'Dashboard Geral');
+        }
+    }
+}
+
+function populateBaseDataTable() {
         const tbody = document.getElementById('baseDataTableBody');
         if (!tbody) return;
 
@@ -1016,8 +1190,9 @@ return downtimeData.filter((item) => {
         const selectedBlock = blocoFilter ? blocoFilter.value : 'all';
 syncAvailabilityForDate(dateEnd.value);
 renderAvailabilityView();
+renderExtraColumnsView();
 
-        const blockDw7A = indexes.map((index) => dw7A[index]);
+        const blockDw7A = indexes.map((index) => dw7A[index]);
         const blockDw7B = indexes.map((index) => dw7B[index]);
         const blockNitrogen = indexes.map((index) => nitrogenNivel[index]);
         const blockCloro = indexes.map((index) => cloroPpm[index]);
@@ -1220,7 +1395,18 @@ const moduleTitles = {
     indisponibilidade: 'Indisponibilidade das Utilidades',
     cloro: 'Teste de Cloro'
 };
-const moduleTitle = moduleTitles[selectedModule] || moduleTitles.all;
+const selectedExtra = extraData.columns.find((col) => 'extra:' + col.key === selectedModule);
+const moduleTitle = selectedExtra ? selectedExtra.label : (moduleTitles[selectedModule] || moduleTitles.all);
+const extraReportHtml = (() => {
+    const { columns, rows } = extraData;
+    const inRange = filterDateRange(rows.map((row) => row.date), startDate, endDate, DEFAULT_YEAR).indexes.map((i) => rows[i]);
+    return columns.map((col) => [
+        '<h3 class="report-section-title">' + escapeHtml(col.label) + '</h3>',
+        '<table class="report-table"><thead><tr><th>Data</th><th>' + escapeHtml(col.label) + '</th></tr></thead><tbody>',
+        inRange.filter((row) => row.values[col.key] !== undefined).map((row) => '<tr><td>' + escapeHtml(row.date) + '</td><td>' + escapeHtml(row.values[col.key]) + '</td></tr>').join(''),
+        '</tbody></table>'
+    ].join(''));
+})();
 
             const filteredLabels = filterDateRange(diasAgosto, startDate, endDate).labels;
             const filteredDw7A = filteredLabels.map((label) => {
@@ -1329,7 +1515,8 @@ const chartImageSpecs = [
 { module: 'dw', chart: window.dwChart, title: 'Consumo de Água (DW 7A / DW 7B)' },
 { module: 'nitrogenio', chart: window.nitrogenChart, title: 'Nível de Nitrogênio' },
 { module: 'cloro', chart: window.chlorineChart, title: 'Monitoramento de Cloro' },
-{ module: 'indisponibilidade', chart: window.indispChart, title: 'Indisponibilidade das Utilidades (Horas)' }
+{ module: 'indisponibilidade', chart: window.indispChart, title: 'Indisponibilidade das Utilidades (Horas)' },
+...extraCharts.map((item) => ({ module: 'extra:' + item.key, chart: item.chart, title: item.chart.data.datasets[0].label }))
 ];
 const chartsHtml = chartImageSpecs
 .filter((spec) => (selectedModule === 'all' || spec.module === selectedModule) && spec.chart && typeof spec.chart.toBase64Image === 'function')
@@ -1403,7 +1590,8 @@ const allDetailsHtml = [
     '<table class="report-table">',
     '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7A</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Obs. DW 7A</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7B</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Obs. DW 7B</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Nitrogênio</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Cloro</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Reteste</th></tr></thead>',
     '<tbody>' + rowsHtml + '</tbody>',
-    '</table>'
+    '</table>',
+    extraReportHtml.join('')
 ].join('');
 const moduleDetailsHtml = {
     availability: [
@@ -1451,6 +1639,9 @@ const moduleDetailsHtml = {
         '</tbody></table>'
     ].join('')
 };
+if (selectedExtra) {
+    moduleDetailsHtml[selectedModule] = extraReportHtml[extraData.columns.indexOf(selectedExtra)];
+}
 const detailsHtml = selectedModule === 'all' ? allDetailsHtml : moduleDetailsHtml[selectedModule] || '';
 
 const reportContent = [
@@ -1492,5 +1683,6 @@ if (typeof module !== 'undefined') {
         resolveBlockSeries,
         parseCsvText,
         buildDataStateFromCsv,
-    };
+        extractExtraColumns,
+    };
 }
