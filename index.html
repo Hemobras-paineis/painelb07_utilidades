@@ -78,14 +78,17 @@
                 </div>
                 <div class="filter-group">
                     <label for="reportModuleFilter">Módulo do relatório:</label>
-                    <select id="reportModuleFilter">
-                        <option value="all">Todos os módulos</option>
-                        <option value="availability">Disponibilidade Diária</option>
-                        <option value="dw">DW</option>
-                        <option value="nitrogenio">Nitrogênio</option>
-                        <option value="indisponibilidade">Indisponibilidade das Utilidades</option>
-                        <option value="cloro">Teste de Cloro</option>
-                    </select>
+                    <details id="reportModuleFilter" class="multi-select">
+                        <summary id="reportModuleSummary">Todos os módulos</summary>
+                        <div class="multi-select-menu">
+                            <label><input type="checkbox" value="all" checked> Todos os módulos</label>
+                            <label><input type="checkbox" value="availability"> Disponibilidade Diária</label>
+                            <label><input type="checkbox" value="dw"> DW</label>
+                            <label><input type="checkbox" value="nitrogenio"> Nitrogênio</label>
+                            <label><input type="checkbox" value="indisponibilidade"> Indisponibilidade das Utilidades</label>
+                            <label><input type="checkbox" value="cloro"> Teste de Cloro</label>
+                        </div>
+                    </details>
                 </div>
                 <button class="btn-filter"><i class="fas fa-filter"></i> Aplicar</button>
                 <button id="reloadCsvData" class="btn-filter btn-reload"><i class="fas fa-sync-alt"></i> Atualizar Dados</button>
@@ -193,6 +196,9 @@
                         </div>
                     </div>
                 </section>
+
+                <!-- Gás natural das caldeiras -->
+                <section class="dashboard" id="dashboardBoilerCharts"></section>
             </div>
 
             <!-- ================= VIEW: DISPONIBILIDADE ================= -->

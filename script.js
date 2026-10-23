@@ -667,6 +667,7 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
     let retestePpm = [...baseDataState.retestePpm];
     let extraData = { columns: [], rows: [] };
     const extraCharts = [];
+    const dashboardBoilerCharts = [];
     let nitroData = [{d: '05/08/2026', n: '116,3', r: '280,2 pol'}, {d: '26/08/2026', n: '218,9', r: 'pol'}];
     const downtimeData = [
         {d: '08/08/2026', u: 'DW 7A', p: '1', h: '2.5h'},
@@ -893,22 +894,71 @@ downtimeComments.push(...downtimeFromSource);
         });
     }
 
+function getSelectedReportModules() {
+    const menu = document.getElementById('reportModuleFilter');
+    const checked = menu ? [...menu.querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value) : [];
+    return checked.length === 0 || checked.includes('all') ? ['all'] : checked;
+}
+
+function updateReportModuleSummary() {
+    const menu = document.getElementById('reportModuleFilter');
+    const summary = document.getElementById('reportModuleSummary');
+    if (!menu || !summary) return;
+    const selected = getSelectedReportModules();
+    if (selected.includes('all')) {
+        summary.textContent = 'Todos os módulos';
+        return;
+    }
+    const labels = selected.map(value => menu.querySelector(`input[value="${value}"]`)?.parentElement.textContent.trim()).filter(Boolean);
+    summary.textContent = labels.length > 2 ? `${labels.length} módulos selecionados` : labels.join(', ');
+}
+
+function initReportModuleFilter() {
+    const menu = document.getElementById('reportModuleFilter');
+    if (!menu || menu.dataset.bound) return;
+    menu.dataset.bound = '1';
+    menu.addEventListener('change', (event) => {
+        const inputs = [...menu.querySelectorAll('input[type="checkbox"]')];
+        const allInput = inputs.find(input => input.value === 'all');
+        if (event.target.value === 'all' && event.target.checked) {
+            inputs.forEach(input => { input.checked = input === allInput; });
+        } else if (event.target.checked && allInput) {
+            allInput.checked = false;
+        }
+        if (!inputs.some(input => input.checked) && allInput) allInput.checked = true;
+        updateReportModuleSummary();
+    });
+    document.addEventListener('click', (event) => {
+        if (!menu.contains(event.target)) menu.removeAttribute('open');
+    });
+}
+
 function renderExtraColumnsView() {
     const navList = document.querySelector('.sidebar-nav ul');
     const container = document.getElementById('extraViewsContainer');
     const reportSelect = document.getElementById('reportModuleFilter');
     const { columns, rows } = extraData;
     if (!navList || !container) return;
+    initReportModuleFilter();
 
     const activeBefore = container.querySelector('.view-section.active')?.id;
     extraCharts.splice(0).forEach(item => item.chart.destroy());
+    dashboardBoilerCharts.splice(0).forEach(chart => chart.destroy());
+    const boilerContainer = document.getElementById('dashboardBoilerCharts');
+    if (boilerContainer) boilerContainer.innerHTML = '';
     container.innerHTML = '';
     navList.querySelectorAll('.extra-nav-item').forEach(li => li.remove());
-    reportSelect?.querySelectorAll('option[data-extra]').forEach(option => option.remove());
+    reportSelect?.querySelectorAll('label[data-extra]').forEach(option => option.remove());
 
-    const reportValue = reportSelect?.value;
-    if (reportSelect && reportValue && reportValue.startsWith('extra:') && !columns.some(col => `extra:${col.key}` === reportValue)) {
-        reportSelect.value = 'all';
+    if (reportSelect) {
+        reportSelect.querySelectorAll('input[value^="extra:"]').forEach(input => {
+            if (!columns.some(col => `extra:${col.key}` === input.value)) input.parentElement.remove();
+        });
+        if (!reportSelect.querySelector('input:checked')) {
+            const allInput = reportSelect.querySelector('input[value="all"]');
+            if (allInput) allInput.checked = true;
+        }
+        updateReportModuleSummary();
     }
     if (!columns.length) {
         if (activeBefore) openView('view-dashboard', 'Dashboard Geral');
@@ -928,11 +978,10 @@ function renderExtraColumnsView() {
         navList.appendChild(li);
 
         if (reportSelect) {
-            const option = document.createElement('option');
-            option.value = `extra:${col.key}`;
-            option.textContent = col.label;
+            const option = document.createElement('label');
             option.dataset.extra = '1';
-            reportSelect.appendChild(option);
+            option.innerHTML = `<input type="checkbox" value="extra:${escapeHtml(col.key)}"> ${escapeHtml(col.label)}`;
+            reportSelect.querySelector('.multi-select-menu').appendChild(option);
         }
 
         const visibleRows = filtered.indexes.map(index => rows[index]).filter(row => row.values[col.key] !== undefined);
@@ -1000,6 +1049,44 @@ function renderExtraColumnsView() {
                     }
                 }
             }) });
+        }
+
+        if (boilerContainer && col.numeric && /caldeira/.test(normalizeCsvHeader(col.label)) && typeof Chart !== 'undefined') {
+            const card = document.createElement('div');
+            card.className = 'chart-card';
+            card.innerHTML = `<h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper small-chart"><canvas></canvas></div>`;
+            boilerContainer.appendChild(card);
+            const color = palette[i % palette.length];
+            dashboardBoilerCharts.push(new Chart(card.querySelector('canvas'), {
+                type: 'line',
+                data: {
+                    labels: visibleRows.map(row => row.date),
+                    datasets: [{
+                        label: col.label,
+                        data: visibleRows.map(row => parseNumberValue(row.values[col.key])),
+                        borderColor: color,
+                        backgroundColor: color,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: { padding: { top: 30, right: 20 } },
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: {
+                            color: '#34495e',
+                            font: { weight: 'bold', size: 10 },
+                            anchor: 'end',
+                            align: 'top',
+                            offset: 4,
+                            formatter: (value) => Number.isFinite(value) ? String(value).replace('.', ',') : ''
+                        }
+                    },
+                    scales: { y: { grace: '12%', title: { display: Boolean(col.unit), text: col.unit } } }
+                }
+            }));
         }
     });
 
@@ -1400,13 +1487,13 @@ renderExtraColumnsView();
     const dailyDateBadge = document.getElementById('dailyDateBadge');
     if (dailyDateBadge) dailyDateBadge.innerText = diasAgosto[initialIndex] || todayLabel;
 
-    const dwChart = new Chart(document.getElementById('dwChart').getContext('2d'), { type: 'bar', data: { labels: diasAgosto, datasets: [ { label: 'DW 7A (m³)', data: dw7A, backgroundColor: '#3498db' }, { label: 'DW 7B (m³)', data: dw7B, backgroundColor: '#27ae60' } ] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, datalabels: { color: '#000', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(1) } } } });
+    const dwChart = new Chart(document.getElementById('dwChart').getContext('2d'), { type: 'bar', data: { labels: diasAgosto, datasets: [ { label: 'DW 7A (m³)', data: dw7A, backgroundColor: '#3498db' }, { label: 'DW 7B (m³)', data: dw7B, backgroundColor: '#27ae60' } ] },     options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { grace: '12%' } }, plugins: { legend: { display: false }, datalabels: { color: '#000', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(1) } } } });
     window.dwChart = dwChart;
 
-    const nitrogenChart = new Chart(document.getElementById('nitrogenChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Nitrogênio (pol)', data: nitrogenNivel, borderColor: '#9b59b6', backgroundColor: 'rgba(155, 89, 182, 0.2)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, datalabels: { color: '#9b59b6', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(1), anchor: 'end', align: 'top', offset: 5 } } } });
+    const nitrogenChart = new Chart(document.getElementById('nitrogenChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Nitrogênio (pol)', data: nitrogenNivel, borderColor: '#9b59b6', backgroundColor: 'rgba(155, 89, 182, 0.2)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { grace: '12%' } }, plugins: { legend: { display: false }, datalabels: { color: '#9b59b6', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(1), anchor: 'end', align: 'top', offset: 5 } } } });
     window.nitrogenChart = nitrogenChart;
 
-    const chlorineChart = new Chart(document.getElementById('chlorineChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', fill: false, tension: 0.1 }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 5, pointHoverRadius: 6, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { suggestedMin: 0, suggestedMax: 3 } }, plugins: { legend: { display: true }, datalabels: { display: (context) => context.datasetIndex < 2 && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 5 } } } });
+    const chlorineChart = new Chart(document.getElementById('chlorineChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', fill: false, tension: 0.1 }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 5, pointHoverRadius: 6, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { suggestedMin: 0, suggestedMax: 3 } }, plugins: { legend: { display: true }, datalabels: { display: (context) => context.datasetIndex < 2 && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 5 } } } });
     window.chlorineChart = chlorineChart;
 
     const dispCanvas = document.getElementById('dispChart');
@@ -1494,13 +1581,15 @@ dwTbody.innerHTML = diasAgosto.map(dwRowHtml).join('');
         });
     }
 
-    const generatePdfButton = document.getElementById('btnGeneratePdf');
+initReportModuleFilter();
+const generatePdfButton = document.getElementById('btnGeneratePdf');
     if (generatePdfButton) {
         generatePdfButton.addEventListener('click', () => {
             const startDate = document.getElementById('dateStart')?.value || '';
             const endDate = document.getElementById('dateEnd')?.value || '';
             const bloco = document.getElementById('blocoFilter')?.value || 'all';
-const selectedModule = document.getElementById('reportModuleFilter')?.value || 'all';
+const selectedModules = getSelectedReportModules();
+const isAllModules = selectedModules.includes('all');
 const moduleTitles = {
     all: 'Todos os módulos',
     availability: 'Disponibilidade Diária',
@@ -1509,8 +1598,11 @@ const moduleTitles = {
     indisponibilidade: 'Indisponibilidade das Utilidades',
     cloro: 'Teste de Cloro'
 };
-const selectedExtra = extraData.columns.find((col) => 'extra:' + col.key === selectedModule);
-const moduleTitle = selectedExtra ? selectedExtra.label : (moduleTitles[selectedModule] || moduleTitles.all);
+const getModuleTitle = (moduleKey) => {
+    const extra = extraData.columns.find((col) => 'extra:' + col.key === moduleKey);
+    return extra ? extra.label : (moduleTitles[moduleKey] || moduleKey);
+};
+const moduleTitle = isAllModules ? moduleTitles.all : selectedModules.map(getModuleTitle).join(', ');
 const extraReportHtml = (() => {
     const { columns, rows } = extraData;
     const inRange = filterDateRange(rows.map((row) => row.date), startDate, endDate, DEFAULT_YEAR).indexes.map((i) => rows[i]);
@@ -1633,7 +1725,7 @@ const chartImageSpecs = [
 ...extraCharts.map((item) => ({ module: 'extra:' + item.key, chart: item.chart, title: item.chart.data.datasets[0].label }))
 ];
 const chartsHtml = chartImageSpecs
-.filter((spec) => (selectedModule === 'all' || spec.module === selectedModule) && spec.chart && typeof spec.chart.toBase64Image === 'function')
+.filter((spec) => (isAllModules || selectedModules.includes(spec.module)) && spec.chart && typeof spec.chart.toBase64Image === 'function')
 .map((spec) => ({ ...spec, image: spec.chart.toBase64Image('image/png', 1) }))
 .filter((spec) => spec.image && spec.image.length > 100)
 .map((spec) => {
@@ -1685,7 +1777,7 @@ const allSummaryHtml = [
     '<div><span>Paradas registradas</span><strong>' + downtimeInRange.length + '</strong></div>'
 ].join('');
 const summaryHtml = '<h3 class="report-section-title">Resumo Operacional</h3><div class="report-summary-grid">' +
-    (selectedModule === 'all' ? allSummaryHtml : (summaryItemsByModule[selectedModule] || []).join('')) +
+    (isAllModules ? allSummaryHtml : selectedModules.map((key) => (summaryItemsByModule[key] || []).join('')).join('')) +
     '</div>';
 
 const allDetailsHtml = [
@@ -1753,10 +1845,10 @@ const moduleDetailsHtml = {
         '</tbody></table>'
     ].join('')
 };
-if (selectedExtra) {
-    moduleDetailsHtml[selectedModule] = extraReportHtml[extraData.columns.indexOf(selectedExtra)];
-}
-const detailsHtml = selectedModule === 'all' ? allDetailsHtml : moduleDetailsHtml[selectedModule] || '';
+extraData.columns.forEach((col, index) => {
+    moduleDetailsHtml['extra:' + col.key] = extraReportHtml[index];
+});
+const detailsHtml = isAllModules ? allDetailsHtml : selectedModules.map((key) => moduleDetailsHtml[key] || '').join('');
 
 const reportContent = [
 '<div id="reportPrintArea">',
@@ -1780,7 +1872,16 @@ detailsHtml,
     const dateStart = document.getElementById('dateStart');
     const dateEnd = document.getElementById('dateEnd');
     const blocoFilter = document.getElementById('blocoFilter');
-    if (dateStart) dateStart.addEventListener('change', applyDateFilters);
+const DEFAULT_VIEW_DAYS = 10;
+if (dateStart && dateEnd) {
+    const today = new Date();
+    const rangeStart = new Date(today);
+    rangeStart.setDate(rangeStart.getDate() - (DEFAULT_VIEW_DAYS - 1));
+    const toLocalIso = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    dateEnd.value = toLocalIso(today);
+    dateStart.value = toLocalIso(rangeStart);
+}
+if (dateStart) dateStart.addEventListener('change', applyDateFilters);
     if (dateEnd) dateEnd.addEventListener('change', applyDateFilters);
     if (blocoFilter) blocoFilter.addEventListener('change', applyDateFilters);
 
