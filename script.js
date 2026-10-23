@@ -99,20 +99,57 @@ function splitCsvLine(line) {
     return values;
 }
 
+function splitCsvRecords(csvText) {
+    const text = String(csvText || '').replace(/^\uFEFF/, '').trim();
+    if (!text) return [];
+
+    const records = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+
+        if (char === '"') {
+            if (inQuotes && text[i + 1] === '"') {
+                current += '""';
+                i += 1;
+                continue;
+            }
+            inQuotes = !inQuotes;
+            current += char;
+            continue;
+        }
+
+        if (char === '\n' && !inQuotes) {
+            if (current.trim()) records.push(current);
+            current = '';
+            continue;
+        }
+
+        if (char !== '\r' || inQuotes || text[i + 1] !== '\n') {
+            current += char;
+        }
+    }
+
+    if (current.trim()) records.push(current);
+    return records;
+}
+
 function parseCsvText(csvText) {
     if (!csvText || !csvText.trim()) return [];
 
-    const lines = csvText.trim().split(/\r?\n/).filter(line => line.trim());
-    if (!lines.length) return [];
+    const records = splitCsvRecords(csvText);
+    if (!records.length) return [];
 
 const headerCounts = new Map();
-const headers = splitCsvLine(lines[0]).map((cell) => {
-    const header = normalizeCsvHeader(cell);
-    const count = (headerCounts.get(header) || 0) + 1;
-    headerCounts.set(header, count);
-    return count === 1 ? header : `${header}${count}`;
+const headers = splitCsvLine(records[0]).map((cell) => {
+const header = normalizeCsvHeader(cell);
+const count = (headerCounts.get(header) || 0) + 1;
+headerCounts.set(header, count);
+return count === 1 ? header : `${header}${count}`;
 });
-    return lines.slice(1).map((line) => {
+    return records.slice(1).map((line) => {
         const values = splitCsvLine(line);
         const row = {};
         headers.forEach((header, index) => {
@@ -127,7 +164,8 @@ function parseNumberValue(rawValue) {
         return 0;
     }
 
-    const sanitized = String(rawValue).trim().replace(/\s+/g, '').replace(/[A-Za-z%]/g, '');
+    const numericPrefix = String(rawValue).trim().replace(/\s+/g, '').match(/^-?[\d.,]+/);
+    const sanitized = numericPrefix ? numericPrefix[0] : '';
     if (!sanitized) return 0;
 
     const hasComma = sanitized.includes(',');
@@ -258,10 +296,10 @@ function buildDataStateFromCsv(csvText) {
 }
 
 function buildDowntimeStateFromCsv(csvText) {
-    const lines = String(csvText || '').trim().split(/\r?\n/).filter(line => line.trim());
-    if (lines.length < 2) return [];
+    const records = splitCsvRecords(csvText);
+    if (records.length < 2) return [];
 
-    const headers = splitCsvLine(lines[0]).map(cell => normalizeCsvHeader(cell));
+    const headers = splitCsvLine(records[0]).map(cell => normalizeCsvHeader(cell));
     const dateIndex = headers.findIndex((header, index) => header === 'data' && index > 0);
     const utilityIndex = headers.indexOf('utilidade');
     const stopsIndex = headers.indexOf('paradas');
@@ -272,7 +310,7 @@ function buildDowntimeStateFromCsv(csvText) {
         return [];
     }
 
-    return lines.slice(1).map((line) => {
+    return records.slice(1).map((line) => {
         const values = splitCsvLine(line);
         const utility = values[utilityIndex]?.trim();
         const hours = formatHoursValue(values[hoursIndex]);
@@ -293,10 +331,10 @@ function buildDowntimeStateFromCsv(csvText) {
 const KNOWN_COLUMN_PATTERN = /^(data|date|dia|datas|dw7|dw7a|dw7b|dwa|dwb|dw7value|nitrogenio\w*|n2|cloro\w*|chlor|testecloro\w*|testedecloro\w*|reteste\w*|testedereteste|reabastecimento|refill|reposicao|utilidade|paradas|tempoindisponivel\w*|comentario\w*)\d*$/;
 
 function extractExtraColumns(csvText) {
-    const lines = String(csvText || '').trim().split(/\r?\n/).filter(line => line.trim());
-    if (lines.length < 2) return { columns: [], rows: [] };
+    const records = splitCsvRecords(csvText);
+    if (records.length < 2) return { columns: [], rows: [] };
 
-    const labels = splitCsvLine(lines[0]);
+    const labels = splitCsvLine(records[0]);
     const norm = labels.map(normalizeCsvHeader);
     const dateIndexes = [];
     norm.forEach((header, index) => { if (/^(data|date|dia|datas)$/.test(header)) dateIndexes.push(index); });
@@ -308,12 +346,13 @@ function extractExtraColumns(csvText) {
         const isDwObservation = /^ob[a-z]*rvacao\d*$/.test(header) && /^dw7[ab]$/.test(norm[index - 1] || '');
         if (isDwObservation || KNOWN_COLUMN_PATTERN.test(header)) return;
         const dateIndex = [...dateIndexes].reverse().find(di => di < index) ?? dateIndexes[0];
-        extras.push({ index, dateIndex, label: labels[index].trim() || `Coluna ${index + 1}`, key: `${header}_${index}` });
+        const label = labels[index].replace(/\s+/g, ' ').trim() || `Coluna ${index + 1}`;
+        extras.push({ index, dateIndex, label, unit: extractColumnUnit(label), key: `${header}_${index}` });
     });
     if (!extras.length) return { columns: [], rows: [] };
 
     const byDate = new Map();
-    const parsedLines = lines.slice(1).map(splitCsvLine);
+    const parsedLines = records.slice(1).map(splitCsvLine);
     extras.forEach((col) => {
         let numericCount = 0;
         let filledCount = 0;
@@ -322,7 +361,7 @@ function extractExtraColumns(csvText) {
             const raw = (values[col.index] || '').trim();
             if (!date || !raw) return;
             filledCount += 1;
-            if (/^-?[\d.,\s]+[A-Za-z%³²]*$/.test(raw) && /\d/.test(raw)) numericCount += 1;
+            if (/^-?[\d.,]+/.test(raw) && Number.isFinite(parseNumberValue(raw))) numericCount += 1;
             if (!byDate.has(date)) byDate.set(date, {});
             byDate.get(date)[col.key] = raw;
         });
@@ -332,6 +371,39 @@ function extractExtraColumns(csvText) {
     const columns = extras.filter(col => parsedLines.some(values => (values[col.index] || '').trim()));
     const rows = [...byDate.entries()].map(([date, values]) => ({ date, values }));
     return { columns, rows };
+}
+
+function extractColumnUnit(label) {
+    const match = String(label || '').trim().match(/\(\(([^()]*)\)\)\s*$|\(([^()]*)\)\s*$|\[([^\]]+)\]\s*$/);
+    return (match?.[1] || match?.[2] || match?.[3] || '').trim();
+}
+
+function formatChartValueWithUnit(rawValue, unit) {
+    const value = String(rawValue ?? '').trim();
+    if (!value || value === '-' || value === '—' || !unit || value.toLowerCase().endsWith(unit.toLowerCase())) return value;
+    return `${value} ${unit}`;
+}
+
+function getDailyBoilerConsumption(columns, rows, date) {
+    const columnByBoiler = {
+        b07Caldeira02: /b07caldeira0?2/,
+        b07Caldeira03: /b07caldeira0?3/,
+        b10Caldeira01: /b10caldeira0?1/,
+        b10Caldeira02: /b10caldeira0?2/
+    };
+    const normalizedDate = normalizeDateValue(date);
+    const row = rows.find(item => normalizeDateValue(item.date) === normalizedDate);
+    const values = {};
+
+    Object.entries(columnByBoiler).forEach(([key, pattern]) => {
+        const column = columns.find(item => pattern.test(normalizeCsvHeader(item.label)));
+        const rawValue = column && row ? row.values[column.key] : '';
+        values[key] = rawValue
+            ? formatChartValueWithUnit(rawValue, column.unit)
+            : '--';
+    });
+
+    return values;
 }
 
 const GOOGLE_SHEETS_CSV_URL = 'https://docs.google.com/spreadsheets/d/1SmjrouY2fg_kFRSYsu6kiptQpHJ2hbIIJR9zHWP1x9Q/export?format=csv&gid=0';
@@ -897,7 +969,29 @@ function renderExtraColumnsView() {
                         tension: 0.3
                     }]
                 },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { datalabels: { display: false } } }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: {
+                            color: '#34495e',
+                            font: { weight: 'bold', size: 10 },
+                            anchor: 'end',
+                            align: 'top',
+                            offset: 4,
+                            formatter: (value, context) => formatChartValueWithUnit(
+                                visibleRows[context.dataIndex]?.values[col.key],
+                                col.unit
+                            )
+                        }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: Boolean(col.unit), text: col.unit }
+                        }
+                    }
+                }
             }) });
         }
     });
@@ -960,6 +1054,12 @@ function populateBaseDataTable() {
         const summaryDw7B = document.getElementById('dailyDw7b');
         const summaryCloro = document.getElementById('dailyCloro');
         const dateBadge = document.getElementById('dailyDateBadge');
+const boilerConsumption = {
+    b07Caldeira02: document.getElementById('dailyGasB07Boiler02'),
+    b07Caldeira03: document.getElementById('dailyGasB07Boiler03'),
+    b10Caldeira01: document.getElementById('dailyGasB10Boiler01'),
+    b10Caldeira02: document.getElementById('dailyGasB10Boiler02')
+};
 
         if (!summaryTarget || !summaryDw7A || !summaryDw7B || !summaryCloro) {
             return;
@@ -974,9 +1074,12 @@ function populateBaseDataTable() {
             summaryDw7A.innerText = '--';
             summaryDw7B.innerText = '--';
             summaryCloro.innerText = '--';
-            if (dateBadge) dateBadge.innerText = todayLabel;
-            return;
-        }
+Object.values(boilerConsumption).forEach(element => {
+    if (element) element.innerText = '--';
+});
+if (dateBadge) dateBadge.innerText = todayLabel;
+return;
+}
 
         const referenceIndex = todayIndex >= 0 ? todayIndex : indexes[indexes.length - 1];
         const displayDate = diasAgosto[referenceIndex] || todayLabel;
@@ -987,6 +1090,10 @@ function populateBaseDataTable() {
         summaryCloro.innerText = cloroPpm[referenceIndex].toFixed(2) + ' ppm';
 
         if (dateBadge) dateBadge.innerText = displayDate;
+const dailyGasValues = getDailyBoilerConsumption(extraData.columns, extraData.rows, displayDate);
+Object.entries(boilerConsumption).forEach(([key, element]) => {
+    if (element) element.innerText = dailyGasValues[key];
+});
 
         // Encontrar parada mais recente de utilidade
         const latestDowntime = [...downtimeData]
@@ -1682,7 +1789,11 @@ if (typeof module !== 'undefined') {
         normalizeDateValue,
         resolveBlockSeries,
         parseCsvText,
+        parseNumberValue,
         buildDataStateFromCsv,
         extractExtraColumns,
+        extractColumnUnit,
+        formatChartValueWithUnit,
+        getDailyBoilerConsumption,
     };
 }

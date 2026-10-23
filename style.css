@@ -148,6 +148,12 @@ th, td { padding: 12px 20px; text-align: left; border-bottom: 1px solid #ecf0f1;
 .daily-card-water-dark i, .daily-card-water-dark h4, .daily-card-water-dark strong { color: #ffffff; }
 .daily-card-chlorine { background: #d9f99d; border-color: #a3e635; }
 .daily-card-chlorine i, .daily-card-chlorine h4, .daily-card-chlorine strong { color: #3f6212; }
+.daily-card-boilers { background: #fef3c7; border-color: #fcd34d; flex: 2 1 360px; }
+.daily-card-boilers > i, .daily-card-boilers h4 { color: #a16207; }
+.daily-boiler-content { flex: 1; min-width: 0; }
+.daily-boiler-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+.daily-boiler-values span { display: flex; flex-direction: column; gap: 2px; color: #854d0e; font-size: 11px; font-weight: 600; }
+.daily-boiler-values strong { font-size: 14px; color: #713f12; }
 .daily-card-availability { background: #f8fafc; border-color: #e2e8f0; justify-content: center; text-align: center; }
 .daily-card-availability div { display: flex; flex-direction: column; align-items: center; }
 

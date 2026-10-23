@@ -1,5 +1,16 @@
 const assert = require('assert');
-const { filterDateRange, normalizeDateValue, resolveBlockSeries, buildDataStateFromCsv } = require('./script.js');
+const {
+  filterDateRange,
+  normalizeDateValue,
+  resolveBlockSeries,
+  parseCsvText,
+  buildDataStateFromCsv,
+  parseNumberValue,
+  extractExtraColumns,
+  extractColumnUnit,
+  formatChartValueWithUnit,
+  getDailyBoilerConsumption
+} = require('./script.js');
 
 assert.strictEqual(normalizeDateValue('2026-08-01'), '2026-08-01');
 assert.deepStrictEqual(
@@ -32,5 +43,42 @@ const parsedObs = buildDataStateFromCsv(obsCsv);
 assert.deepStrictEqual(parsedObs.obsDw7A, ['obs A', '']);
 assert.deepStrictEqual(parsedObs.obsDw7B, ['obs B', '']);
 assert.deepStrictEqual(parsedObs.dw7A, [167.3, 158.2]);
+
+const multilineHeaderCsv = [
+  'DATA,"CONSUMO GÁS NATURAL',
+  'TOTAL ((Nm³/h))",OBSERVAÇÃO',
+  '01/02/2026,"12,5",Leitura válida',
+  '02/02/2026,"13,2",Leitura válida'
+].join('\n');
+assert.strictEqual(parseCsvText(multilineHeaderCsv).length, 2);
+const extraColumns = extractExtraColumns(multilineHeaderCsv);
+const gasColumn = extraColumns.columns.find(column => column.numeric);
+assert.ok(gasColumn);
+assert.strictEqual(gasColumn.unit, 'Nm³/h');
+assert.deepStrictEqual(extraColumns.rows.map(row => row.values[gasColumn.key]), ['12,5', '13,2']);
+assert.strictEqual(parseNumberValue('12,5 Nm³/h'), 12.5);
+assert.strictEqual(extractColumnUnit('Temperatura [°C]'), '°C');
+assert.strictEqual(formatChartValueWithUnit('12,5', 'Nm³/h'), '12,5 Nm³/h');
+assert.strictEqual(formatChartValueWithUnit('12,5 Nm³/h', 'Nm³/h'), '12,5 Nm³/h');
+assert.strictEqual(formatChartValueWithUnit('-', 'Nm³/h'), '-');
+
+const boilerCsv = [
+  'DATA,"CONSUMO GÁS NATURAL - B07 CALDEIRA 02 (Nm³/h)","CONSUMO GÁS NATURAL - B07 CALDEIRA 03 (Nm³/h)","CONSUMO GÁS NATURAL - B10 CALDEIRA 01 (Nm³/h)","CONSUMO GÁS NATURAL - B10 CALDEIRA 02 (Nm³/h)"',
+  '23/10/2026,"75,0","-","45,2","44,8"'
+].join('\n');
+const boilerData = extractExtraColumns(boilerCsv);
+assert.deepStrictEqual(
+  getDailyBoilerConsumption(boilerData.columns, boilerData.rows, '23/10/2026'),
+  {
+    b07Caldeira02: '75,0 Nm³/h',
+    b07Caldeira03: '-',
+    b10Caldeira01: '45,2 Nm³/h',
+    b10Caldeira02: '44,8 Nm³/h'
+  }
+);
+assert.deepStrictEqual(
+  getDailyBoilerConsumption(boilerData.columns, boilerData.rows, '22/10/2026'),
+  { b07Caldeira02: '--', b07Caldeira03: '--', b10Caldeira01: '--', b10Caldeira02: '--' }
+);
 
 console.log('date-filter.test.js: OK');
