@@ -194,6 +194,30 @@ function formatHoursValue(rawValue) {
     return `${numeric.toFixed(1).replace(/\.0$/, '')}h`;
 }
 
+function extractChlorineSeries(csvText) {
+    const records = splitCsvRecords(csvText);
+    if (records.length < 2) return [];
+    const cells = splitCsvLine(records[0]);
+    const norm = cells.map((cell) => normalizeCsvHeader(cell));
+    const dataRows = records.slice(1).map((line) => splitCsvLine(line));
+    const toNumber = (raw) => {
+        const text = String(raw ?? '').trim();
+        return text ? parseNumberValue(text) : null;
+    };
+    const series = [];
+    norm.forEach((header, index) => {
+        if (!/^(testedecloro|testecloro|cloro)/.test(header)) return;
+        const hasReteste = (norm[index + 1] || '').startsWith('reteste');
+        series.push({
+            name: cells[index].replace(/\s+/g, ' ').trim(),
+            retesteName: hasReteste ? cells[index + 1].replace(/\s+/g, ' ').trim() : '',
+            values: dataRows.map((row) => toNumber(row[index])),
+            reteste: hasReteste ? dataRows.map((row) => toNumber(row[index + 1])) : dataRows.map(() => null)
+        });
+    });
+    return series;
+}
+
 function buildDataStateFromCsv(csvText) {
     const rows = parseCsvText(csvText);
     if (!rows.length) {
@@ -304,16 +328,28 @@ const retestePpm = rows.map((row) => {
         }))
         .filter((item) => item.d && item.r && item.r !== '-');
 
-    return { diasAgosto, dw7A, dw7B, obsDw7A, obsDw7B, nitrogenNivel, cloroPpm, retestePpm, nitroData };
+    return { diasAgosto, dw7A, dw7B, obsDw7A, obsDw7B, nitrogenNivel, cloroPpm, retestePpm, nitroData, cloroSeries: extractChlorineSeries(csvText) };
 }
 
 function buildDowntimeStateFromCsv(csvText) {
     const records = splitCsvRecords(csvText);
     if (records.length < 2) return [];
 
-    const headers = splitCsvLine(records[0]).map(cell => normalizeCsvHeader(cell));
-    const dateIndex = headers.findIndex((header, index) => header === 'data' && index > 0);
+    // O cabeçalho pode não ser a primeira linha (ex.: linha em branco acima na aba).
+    let headerRow = -1;
+    let headers = [];
+    for (let r = 0; r < Math.min(records.length, 15); r += 1) {
+        const candidate = splitCsvLine(records[r]).map(cell => normalizeCsvHeader(cell));
+        if (candidate.includes('utilidade') && candidate.includes('paradas')) {
+            headerRow = r;
+            headers = candidate;
+            break;
+        }
+    }
+    if (headerRow < 0) return [];
+
     const utilityIndex = headers.indexOf('utilidade');
+    const dateIndex = headers.reduce((found, header, index) => (header === 'data' && index < utilityIndex ? index : found), -1);
     const stopsIndex = headers.indexOf('paradas');
     const hoursIndex = headers.findIndex(header => header.includes('tempoindisponivel'));
     const commentIndex = headers.findIndex(header => header.includes('comentario'));
@@ -322,7 +358,7 @@ function buildDowntimeStateFromCsv(csvText) {
         return [];
     }
 
-    return records.slice(1).map((line) => {
+    return records.slice(headerRow + 1).map((line) => {
         const values = splitCsvLine(line);
         const utility = values[utilityIndex]?.trim();
         const hours = formatHoursValue(values[hoursIndex]);
@@ -423,6 +459,7 @@ const DATA_SOURCE_URL = GOOGLE_SHEETS_CSV_URL;
 const DATA_SOURCE_CANDIDATES = [DATA_SOURCE_URL];
 
 const GOOGLE_SHEETS_PAGE2_CANDIDATES = [
+    'https://docs.google.com/spreadsheets/d/1SmjrouY2fg_kFRSYsu6kiptQpHJ2hbIIJR9zHWP1x9Q/export?format=csv&gid=1340556769',
     'https://docs.google.com/spreadsheets/d/1SmjrouY2fg_kFRSYsu6kiptQpHJ2hbIIJR9zHWP1x9Q/export?format=csv&gid=0',
     'https://docs.google.com/spreadsheets/d/1SmjrouY2fg_kFRSYsu6kiptQpHJ2hbIIJR9zHWP1x9Q/export?format=csv&gid=1',
     'https://docs.google.com/spreadsheets/d/1SmjrouY2fg_kFRSYsu6kiptQpHJ2hbIIJR9zHWP1x9Q/gviz/tq?tqx=out:csv&sheet=Página%201',
@@ -677,6 +714,26 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
     let nitrogenNivel = [...baseDataState.nitrogenNivel];
     let cloroPpm = [...baseDataState.cloroPpm];
     let retestePpm = [...baseDataState.retestePpm];
+    let cloroSeries = [];
+    const getChlorineSeries = () => cloroSeries.length
+        ? cloroSeries
+        : [{ name: 'Teste de Cloro', retesteName: 'Reteste', values: cloroPpm.map((v) => (v > 0 ? v : null)), reteste: retestePpm }];
+    const chlorineColors = ['#34495e', '#8e44ad', '#16a085', '#2980b9', '#d35400'];
+    const chlorineDatasets = (indexList, large) => {
+        const datasets = [];
+        getChlorineSeries().forEach((serie, k) => {
+            const color = chlorineColors[k % chlorineColors.length];
+            datasets.push({ label: serie.name, data: indexList.map((i) => serie.values[i] ?? null), borderColor: color, backgroundColor: color, borderWidth: large ? 3 : 2, fill: false, tension: 0.1, spanGaps: true, pointRadius: large ? 5 : 3 });
+            if (serie.reteste.some((v) => v !== null && v !== undefined)) {
+                const suffix = (serie.name.match(/[-–]\s*(.+)$/) || [])[1];
+                datasets.push({ label: serie.retesteName ? (suffix ? `${serie.retesteName} - ${suffix}` : serie.retesteName) : 'Reteste', data: indexList.map((i) => serie.reteste[i] ?? null), borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: large ? 6 : 5, pointStyle: 'rectRot', spanGaps: false, showLine: false, fill: false });
+            }
+        });
+        datasets.push({ label: 'Limite inferior (1,00)', isLimit: true, data: indexList.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false });
+        datasets.push({ label: 'Limite superior (2,00)', isLimit: true, data: indexList.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false });
+        return datasets;
+    };
+    const hasChlorineData = (i) => getChlorineSeries().some((s) => (s.values[i] ?? 0) > 0 || (s.reteste[i] !== null && s.reteste[i] !== undefined));
     let extraData = { columns: [], rows: [] };
     const extraCharts = [];
     const dashboardBoilerCharts = [];
@@ -745,6 +802,36 @@ function syncAvailabilityForDate(referenceDate) {
             `;
         }).join('');
     }
+    let downtimeSheetUrl = '';
+    // Acha a tabela de paradas pelo conteúdo: aba principal, abas descobertas e candidatas.
+    async function findDowntime(mainCsvText, mainUrl) {
+        const own = buildDowntimeStateFromCsv(mainCsvText);
+        if (own.length) {
+            downtimeSheetUrl = '';
+            return own;
+        }
+        const base = GOOGLE_SHEETS_CSV_URL.split('/export')[0];
+        let discovered = [];
+        try {
+            const html = await (await fetch(`${base}/htmlview`, { cache: 'no-store' })).text();
+            discovered = [...new Set([...html.matchAll(/gid[=:]\s*"?(\d+)/g)].map(m => m[1]))]
+                .map(g => `${base}/export?format=csv&gid=${g}`);
+        } catch (e) { /* sem acesso à lista de abas */ }
+        const candidates = [...new Set([downtimeSheetUrl, ...discovered, ...GOOGLE_SHEETS_PAGE2_CANDIDATES].filter(u => u && u !== mainUrl))];
+        for (const candidate of candidates) {
+            try {
+                const response = await fetch(`${candidate}${candidate.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' });
+                if (!response.ok) continue;
+                const result = buildDowntimeStateFromCsv(await response.text());
+                if (result.length) {
+                    downtimeSheetUrl = candidate;
+                    return result;
+                }
+            } catch (e) { continue; }
+        }
+        return [];
+    }
+
     async function loadDataFromCsv(csvUrl = DATA_SOURCE_CANDIDATES[0]) {
         const sourceUrls = csvUrl
             ? [csvUrl, ...DATA_SOURCE_CANDIDATES.filter(url => url !== csvUrl)]
@@ -774,10 +861,11 @@ function syncAvailabilityForDate(referenceDate) {
                 nitrogenNivel = [...parsed.nitrogenNivel];
                 cloroPpm = [...parsed.cloroPpm];
                 retestePpm = [...parsed.retestePpm];
+                cloroSeries = parsed.cloroSeries || [];
                 nitroData = [...parsed.nitroData];
                 extraData = extractExtraColumns(csvText);
 
-const downtimeFromSource = buildDowntimeStateFromCsv(csvText);
+const downtimeFromSource = await findDowntime(csvText, url);
 if (downtimeFromSource.length) {
 downtimeData.length = 0;
 downtimeData.push(...downtimeFromSource);
@@ -806,6 +894,7 @@ return true;
         nitrogenNivel = [...defaultData.nitrogenNivel];
         cloroPpm = [...defaultData.cloroPpm];
     retestePpm = [...defaultData.retestePpm];
+    cloroSeries = [];
         extraData = { columns: [], rows: [] };
                 syncAvailabilityForDate(document.getElementById('dateEnd')?.value);
                 renderAvailabilityView();
@@ -1298,14 +1387,20 @@ dwTbody.innerHTML = indexes.filter((i) => dw7A[i] > 0 || dw7B[i] > 0).map((i) =>
 
         const cloroTbody = document.getElementById('cloroTableBody');
         if (cloroTbody) {
-const cloroRows = indexes.filter((i) => cloroPpm[i] > 0 || (retestePpm[i] !== null && retestePpm[i] !== undefined));
+const cloroRows = indexes.filter(hasChlorineData);
 cloroTbody.innerHTML = cloroRows.map((originalIndex) => {
 const dia = diasAgosto[originalIndex];
-                const color = (cloroPpm[originalIndex] < 1.0 || cloroPpm[originalIndex] > 2.0) ? 'color: #e74c3c; font-weight: bold;' : '';
-                const reteste = retestePpm[originalIndex];
-                const formattedDate = /\/\d{4}$/.test(String(dia)) ? dia : `${dia}/2026`;
-                return `<tr><td><strong>${formattedDate}</strong></td><td>1.00</td><td style="${color}">${cloroPpm[originalIndex].toFixed(2)}</td><td>2.00</td><td>${reteste === null || reteste === undefined ? '-' : reteste.toFixed(2)}</td><td>${reteste === null || reteste === undefined ? '' : 'Reteste realizado'}</td></tr>`;
-            }).join('');
+const formattedDate = /\/\d{4}$/.test(String(dia)) ? dia : `${dia}/2026`;
+return getChlorineSeries().map((serie) => {
+    const value = serie.values[originalIndex];
+    const reteste = serie.reteste[originalIndex];
+    const hasValue = value !== null && value !== undefined;
+    const hasReteste = reteste !== null && reteste !== undefined;
+    if (!hasValue && !hasReteste) return '';
+    const color = hasValue && (value < 1.0 || value > 2.0) ? 'color: #e74c3c; font-weight: bold;' : '';
+    return `<tr><td><strong>${formattedDate}</strong></td><td>${escapeHtml(serie.name)}</td><td>1.00</td><td style="${color}">${hasValue ? value.toFixed(2) : '-'}</td><td>2.00</td><td>${hasReteste ? reteste.toFixed(2) : '-'}</td><td>${hasReteste ? 'Reteste realizado' : ''}</td></tr>`;
+}).join('');
+}).join('');
         }
 
         const nitroTbody = document.getElementById('nitroTableBody');
@@ -1415,7 +1510,7 @@ const selectedBlock = blocoFilter ? blocoFilter.value : 'all';
 // Cada módulo usa só as datas em que a sua própria coluna tem valor.
 const hasDwData = (index) => dw7A[index] > 0 || dw7B[index] > 0;
 const hasNitroData = (index) => nitrogenNivel[index] > 0;
-const hasCloroData = (index) => cloroPpm[index] > 0 || (retestePpm[index] !== null && retestePpm[index] !== undefined);
+const hasCloroData = hasChlorineData;
 const pickIndexes = (has) => {
     const own = indexes.filter(has);
     return noDateFilter ? own.slice(-DASHBOARD_RECENT_DAYS) : own;
@@ -1470,12 +1565,8 @@ nitrogenChart.update();
 
 const chlorineChart = window.chlorineChart;
 if (chlorineChart) {
-const cloroLabels = labelsOf(cloroRecent);
-chlorineChart.data.labels = cloroLabels;
-chlorineChart.data.datasets[0].data = cloroRecent.map((index) => cloroPpm[index]);
-chlorineChart.data.datasets[1].data = cloroRecent.map((index) => retestePpm[index]);
-chlorineChart.data.datasets[2].data = cloroLabels.map(() => 1);
-chlorineChart.data.datasets[3].data = cloroLabels.map(() => 2);
+chlorineChart.data.labels = labelsOf(cloroRecent);
+chlorineChart.data.datasets = chlorineDatasets(cloroRecent, false);
 chlorineChart.update();
 }
 
@@ -1498,12 +1589,8 @@ nitrogenChartTv.data.labels = labelsOf(nitroIndexes);
 
         const chlorineChartTv = window.chlorineChartTv;
         if (chlorineChartTv) {
-const cloroTvLabels = labelsOf(cloroIndexes);
-chlorineChartTv.data.labels = cloroTvLabels;
-chlorineChartTv.data.datasets[0].data = filteredCloro;
-chlorineChartTv.data.datasets[1].data = filteredReteste;
-chlorineChartTv.data.datasets[2].data = cloroTvLabels.map(() => 1);
-chlorineChartTv.data.datasets[3].data = cloroTvLabels.map(() => 2);
+chlorineChartTv.data.labels = labelsOf(cloroIndexes);
+chlorineChartTv.data.datasets = chlorineDatasets(cloroIndexes, true);
 chlorineChartTv.update();
 }
 
@@ -1531,7 +1618,7 @@ renderFilteredTables(labels, indexes);
     const nitrogenChart = new Chart(document.getElementById('nitrogenChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Nitrogênio (pol)', data: nitrogenNivel, borderColor: '#9b59b6', backgroundColor: 'rgba(155, 89, 182, 0.2)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { grace: '12%' } }, plugins: { legend: { display: false }, datalabels: { color: '#9b59b6', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(1), anchor: 'end', align: 'top', offset: 5 } } } });
     window.nitrogenChart = nitrogenChart;
 
-    const chlorineChart = new Chart(document.getElementById('chlorineChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', fill: false, tension: 0.1 }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 5, pointHoverRadius: 6, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { suggestedMin: 0, suggestedMax: 3 } }, plugins: { legend: { display: true }, datalabels: { display: (context) => context.datasetIndex < 2 && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 5 } } } });
+    const chlorineChart = new Chart(document.getElementById('chlorineChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', fill: false, tension: 0.1 }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 5, pointHoverRadius: 6, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { suggestedMin: 0, suggestedMax: 3 } }, plugins: { legend: { display: true }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 5 } } } });
     window.chlorineChart = chlorineChart;
 
     const dispCanvas = document.getElementById('dispChart');
@@ -1570,7 +1657,7 @@ window.setIndispChartTvFonts = (isTv) => {
 
     const chlorineChartTvCanvas = document.getElementById('chlorineChartTv');
     if (chlorineChartTvCanvas) {
-    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 20 } } }, y: { suggestedMin: 0, suggestedMax: 3, ticks: { font: { size: 20 } } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { display: (context) => context.datasetIndex < 2 && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
+    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 20 } } }, y: { suggestedMin: 0, suggestedMax: 3, ticks: { font: { size: 20 } } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
         window.chlorineChartTv = chlorineChartTv;
     }
 
@@ -1929,7 +2016,8 @@ document.addEventListener('visibilitychange', () => {
 if (typeof module !== 'undefined') {
     module.exports = {
         filterDateRange,
-        normalizeDateValue,
+buildDowntimeStateFromCsv,
+normalizeDateValue,
         resolveBlockSeries,
         parseCsvText,
         parseNumberValue,
