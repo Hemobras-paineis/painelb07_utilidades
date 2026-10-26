@@ -1,6 +1,6 @@
 const DEFAULT_YEAR = 2026;
 const DASHBOARD_RECENT_DAYS = 10;
-const AUTO_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const AUTO_REFRESH_INTERVAL_MS = 30 * 1000;
 
 // Register ChartJS Datalabels plugin
 if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
@@ -145,7 +145,8 @@ function parseCsvText(csvText) {
 
 const headerCounts = new Map();
 const headers = splitCsvLine(records[0]).map((cell) => {
-const header = normalizeCsvHeader(cell);
+// Ignora unidades entre parênteses/colchetes para que renomear "(m³)" não quebre o mapeamento.
+const header = normalizeCsvHeader(String(cell).replace(/\([^)]*\)|\[[^\]]*\]/g, '')) || normalizeCsvHeader(cell);
 const count = (headerCounts.get(header) || 0) + 1;
 headerCounts.set(header, count);
 return count === 1 ? header : `${header}${count}`;
@@ -200,27 +201,44 @@ function buildDataStateFromCsv(csvText) {
         return null;
     }
 
-    const getValue = (row, keys) => {
-        const normalizedAliases = new Set(keys.map(key => normalizeCsvHeader(key)));
+const rowKeys = Object.keys(rows[0] || {});
+const FUZZY_FIELDS = {
+data: /^(data|date|dia)/,
+dw7a: /dw7?a/,
+dw7b: /dw7?b/,
+nitrogenio: /nitrog|^n2/,
+cloro: /^(?!.*reteste).*(cloro|chlor)/,
+reteste: /reteste/,
+reabastecimento: /reabast|refill|repos/
+};
+const COLUMN_MEMORY_KEY = 'painelHemobras.columnIndexes';
+let columnMemory = {};
+try { columnMemory = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem(COLUMN_MEMORY_KEY)) || '{}'); } catch (e) { columnMemory = {}; }
+const newMemory = { ...columnMemory };
+const hasData = (key) => key && rows.some((row) => String(row[key] ?? '').trim() !== '');
 
-        for (const key of keys) {
-            const value = row[key];
-            if (value !== undefined && value !== null && String(value).trim() !== '') {
-                return String(value).trim();
-            }
-        }
+// Resolve a coluna por apelido; se renomeada, tenta nome parecido e, por fim, a posição anteriormente conhecida.
+const keyCache = new Map();
+const resolveKey = (keys) => {
+const field = normalizeCsvHeader(keys[0]);
+if (keyCache.has(field + keys.length)) return keyCache.get(field + keys.length);
+const key = resolveKeyUncached(keys, field);
+keyCache.set(field + keys.length, key);
+return key;
+};
+const resolveKeyUncached = (keys, field) => {
+const aliases = new Set(keys.map(key => normalizeCsvHeader(key)));
+let key = rowKeys.find((k) => aliases.has(k) && hasData(k));
+if (!key && FUZZY_FIELDS[field]) key = rowKeys.find((k) => FUZZY_FIELDS[field].test(k) && hasData(k));
+if (!key && columnMemory[field] !== undefined && hasData(rowKeys[columnMemory[field]])) key = rowKeys[columnMemory[field]];
+if (key) newMemory[field] = rowKeys.indexOf(key);
+return key;
+};
 
-        for (const [rowKey, value] of Object.entries(row)) {
-            if (normalizedAliases.has(normalizeCsvHeader(rowKey))) {
-                const textValue = String(value ?? '').trim();
-                if (textValue) {
-                    return textValue;
-                }
-            }
-        }
-
-        return '';
-    };
+const getValue = (row, keys) => {
+const key = resolveKey(keys);
+return key ? String(row[key] ?? '').trim() : '';
+};
 
     const diasAgosto = rows.map((row) => getValue(row, ['data', 'date', 'dia', 'datas'])).filter(Boolean);
 
@@ -270,14 +288,14 @@ function buildDataStateFromCsv(csvText) {
     const dw7B = dwValues.map(item => item.dw7B);
 
     // A observação de cada DW é a coluna imediatamente à direita dele na planilha.
-    const rowKeys = Object.keys(rows[0] || {});
-    const getObservations = (dwKey) => {
+    const getObservations = (dwFieldKeys) => {
+        const dwKey = resolveKey(dwFieldKeys);
         const dwIndex = rowKeys.indexOf(dwKey);
-        const obsKey = dwIndex >= 0 && /^ob[a-z]*rvacao/.test(rowKeys[dwIndex + 1] || '') ? rowKeys[dwIndex + 1] : null;
+        const obsKey = dwIndex >= 0 && /^ob[a-z]*rvacao|^obs|^coment/.test(rowKeys[dwIndex + 1] || '') ? rowKeys[dwIndex + 1] : null;
         return rows.map((row) => (obsKey ? String(row[obsKey] ?? '').trim() : ''));
     };
-    const obsDw7A = getObservations('dw7a');
-    const obsDw7B = getObservations('dw7b');
+    const obsDw7A = getObservations(['dw7a', 'dwa']);
+    const obsDw7B = getObservations(['dw7b', 'dwb']);
     const nitrogenNivel = rows.map((row) => parseNumberValue(getValue(row, ['nitrogenio', 'nitrogenioppm', 'nitrogenioNivel', 'nitrogenioN', 'nitrogenioL', 'n2', 'nitrogenio1', 'nitrogenioff'])));
     const cloroPpm = rows.map((row) => parseNumberValue(getValue(row, ['cloro', 'cloroppm', 'cloroPpm', 'testecloro', 'testedecloro', 'testedecloroppm', 'chlor', 'teste de cloro'])));
     const retestePpm = rows.map((row) => {
@@ -293,7 +311,23 @@ function buildDataStateFromCsv(csvText) {
         }))
         .filter((item) => item.d && item.r && item.r !== '-');
 
-    return { diasAgosto, dw7A, dw7B, obsDw7A, obsDw7B, nitrogenNivel, cloroPpm, retestePpm, nitroData };
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem(COLUMN_MEMORY_KEY, JSON.stringify(newMemory)); } catch (e) { /* ignora */ }
+
+    const rawHeaderLabels = splitCsvLine(splitCsvRecords(csvText)[0] || '');
+    const labelOf = (keys) => {
+        const index = rowKeys.indexOf(resolveKey(keys));
+        return index >= 0 ? String(rawHeaderLabels[index] || '').trim() : '';
+    };
+    const labels = {
+        dw7a: labelOf(['dw7a', 'dwa']),
+        dw7b: labelOf(['dw7b', 'dwb']),
+        nitrogenio: labelOf(['nitrogenio', 'nitrogenioppm', 'nitrogenioNivel', 'nitrogenioN', 'nitrogenioL', 'n2', 'nitrogenio1', 'nitrogenioff']),
+        cloro: labelOf(['cloro', 'cloroppm', 'cloroPpm', 'testecloro', 'testedecloro', 'testedecloroppm', 'chlor', 'teste de cloro']),
+        reteste: labelOf(['reteste', 'retestecloro', 'testedereteste']),
+        reabastecimento: labelOf(['reabastecimento', 'refill', 'reposicao'])
+    };
+
+    return { labels, diasAgosto, dw7A, dw7B, obsDw7A, obsDw7B, nitrogenNivel, cloroPpm, retestePpm, nitroData };
 }
 
 function buildDowntimeStateFromCsv(csvText) {
@@ -301,11 +335,11 @@ function buildDowntimeStateFromCsv(csvText) {
     if (records.length < 2) return [];
 
     const headers = splitCsvLine(records[0]).map(cell => normalizeCsvHeader(cell));
-    const dateIndex = headers.findIndex((header, index) => header === 'data' && index > 0);
-    const utilityIndex = headers.indexOf('utilidade');
-    const stopsIndex = headers.indexOf('paradas');
-    const hoursIndex = headers.findIndex(header => header.includes('tempoindisponivel'));
-    const commentIndex = headers.findIndex(header => header.includes('comentario'));
+    const stopsIndex = headers.findIndex(header => /^(paradas?|qtdparadas|quantidadeparadas|numeroparadas|ocorrencias)$/.test(header));
+    const utilityIndex = headers.findIndex(header => /^(utilidades?|equipamento|unidade|nomeutilidade|utilidadeparada)$/.test(header));
+    const hoursIndex = headers.findIndex(header => /tempoindisponivel|horasparadas|^horas$|^tempo$|duracao|totalhoras/.test(header));
+    const commentIndex = headers.findIndex(header => /comentario|observacao|detalhe|motivo/.test(header));
+    const dateIndex = headers.findIndex((header, index) => /^(data|date|dia|dataparada|datadaparada)$/.test(header) && (index > 0 || utilityIndex > 0));
 
     if ([dateIndex, utilityIndex, stopsIndex, hoursIndex, commentIndex].some(index => index < 0)) {
         return [];
@@ -348,7 +382,7 @@ function extractExtraColumns(csvText) {
         if (isDwObservation || KNOWN_COLUMN_PATTERN.test(header)) return;
         const dateIndex = [...dateIndexes].reverse().find(di => di < index) ?? dateIndexes[0];
         const label = labels[index].replace(/\s+/g, ' ').trim() || `Coluna ${index + 1}`;
-        extras.push({ index, dateIndex, label, unit: extractColumnUnit(label), key: `${header}_${index}` });
+        extras.push({ index, dateIndex, label, unit: normalizeGasUnit(label, extractColumnUnit(label)), key: `${header}_${index}` });
     });
     if (!extras.length) return { columns: [], rows: [] };
 
@@ -374,9 +408,96 @@ function extractExtraColumns(csvText) {
     return { columns, rows };
 }
 
+// Gás natural é medido em Nm³ (normal metro cúbico), mesmo que a planilha traga apenas "m³".
+function normalizeGasUnit(label, unit) {
+    if (!/gasnatural/.test(normalizeCsvHeader(label))) return unit;
+    return /^n?m[³3]/i.test(unit) ? unit.replace(/^n?m[³3]/i, 'Nm³') : unit;
+}
+
 function extractColumnUnit(label) {
     const match = String(label || '').trim().match(/\(\(([^()]*)\)\)\s*$|\(([^()]*)\)\s*$|\[([^\]]+)\]\s*$/);
     return (match?.[1] || match?.[2] || match?.[3] || '').trim();
+}
+
+// Textos fixos do painel que passam a refletir o nome/unidade vigente na planilha.
+const LABEL_DEFAULTS = [
+    { field: 'dw7a', from: 'DW 7A', kind: 'name', alsoFrom: ['Consumo DW 7A'] },
+    { field: 'dw7b', from: 'DW 7B', kind: 'name', alsoFrom: ['Consumo DW 7B'] },
+    { field: 'nitrogenio', from: 'Nitrogênio', kind: 'name', alsoFrom: ['Nível de Nitrogênio'] },
+    { field: 'cloro', from: 'Teste de Cloro', kind: 'name', alsoFrom: ['Cloro'] },
+    { field: 'reteste', from: 'Reteste', kind: 'name' },
+    { field: 'reabastecimento', from: 'Reabastecimento', kind: 'name' },
+    { field: 'dw7a', from: 'm³', kind: 'unit' },
+    { field: 'cloro', from: 'ppm', kind: 'unit' },
+    { field: 'reabastecimento', from: 'pol', kind: 'unit' }
+];
+let sheetLabelMap = new Map();
+let sheetLabelRegex = null;
+
+function stripColumnUnit(label) {
+    return String(label || '').replace(/\s*(\(\([^()]*\)\)|\([^()]*\)|\[[^\]]+\])\s*$/, '').replace(/\s+/g, ' ').trim();
+}
+
+function setSheetLabels(rawLabels) {
+    const map = new Map();
+    LABEL_DEFAULTS.forEach((def) => {
+        const raw = rawLabels && rawLabels[def.field];
+        if (!raw) return;
+        const to = def.kind === 'unit' ? extractColumnUnit(raw) : stripColumnUnit(raw);
+        if (!to) return;
+        [def.from, ...(def.alsoFrom || [])].forEach((from) => {
+            if (from !== to && !(from !== def.from && to === def.from)) map.set(from, to);
+        });
+    });
+    sheetLabelMap = map;
+    const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const sources = [...map.keys()].sort((a, b) => b.length - a.length);
+    sheetLabelRegex = sources.length
+        ? new RegExp(`(?<![\\p{L}\\p{N}])(${sources.map(escape).join('|')})(?![\\p{L}\\p{N}])`, 'gu')
+        : null;
+}
+
+function applySheetLabels(text) {
+    if (!sheetLabelRegex) return text;
+    return text.replace(sheetLabelRegex, (match) => sheetLabelMap.get(match) ?? match);
+}
+
+function renderTracked(holder, prop) {
+    const current = holder[prop];
+    if (typeof current !== 'string') return;
+    const state = holder.__labelState || (holder.__labelState = {});
+    const entry = state[prop];
+    const original = entry && entry.rendered === current ? entry.original : current;
+    const rendered = applySheetLabels(original);
+    state[prop] = { original, rendered };
+    if (rendered !== current) holder[prop] = rendered;
+}
+
+let labelObserver = null;
+function refreshPanelLabels(includeCharts = true) {
+    if (typeof document === 'undefined') return;
+    if (labelObserver) labelObserver.disconnect();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => /^(SCRIPT|STYLE|TEXTAREA)$/.test(node.parentNode?.nodeName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((node) => renderTracked(node, 'data'));
+
+    if (includeCharts && typeof Chart !== 'undefined' && Chart.instances) {
+        Object.values(Chart.instances).forEach((chart) => {
+            chart.data.datasets.forEach((dataset) => renderTracked(dataset, 'label'));
+            Object.values(chart.options?.scales || {}).forEach((scale) => {
+                if (scale.title) renderTracked(scale.title, 'text');
+            });
+            chart.update('none');
+        });
+    }
+
+    if (!labelObserver) {
+        labelObserver = new MutationObserver(() => refreshPanelLabels(false));
+    }
+    labelObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 }
 
 function formatChartValueWithUnit(rawValue, unit) {
@@ -734,7 +855,33 @@ function syncAvailabilityForDate(referenceDate) {
             `;
         }).join('');
     }
-    async function loadDataFromCsv(csvUrl = DATA_SOURCE_CANDIDATES[0]) {
+    let downtimeSheetUrl = '';
+    // Procura a tabela de paradas em qualquer aba (pelo conteúdo, não pelo nome/posição).
+    async function findDowntimeInOtherSheets(mainUrl) {
+        const base = GOOGLE_SHEETS_CSV_URL.split('/export')[0];
+        let discovered = [];
+        try {
+            const html = await (await fetch(`${base}/htmlview`, { cache: 'no-store' })).text();
+            const gids = [...html.matchAll(/gid[=:]\s*"?(\d+)/g)].map(m => m[1]);
+            discovered = [...new Set(gids)].map(g => `${base}/export?format=csv&gid=${g}`);
+        } catch (e) { /* sem acesso à lista de abas; usa candidatos conhecidos */ }
+        const candidates = [...new Set([downtimeSheetUrl, ...discovered, ...GOOGLE_SHEETS_PAGE2_CANDIDATES].filter(u => u && u !== mainUrl))];
+        for (const candidate of candidates) {
+            try {
+                const response = await fetch(`${candidate}${candidate.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' });
+                if (!response.ok) continue;
+                const result = buildDowntimeStateFromCsv(await response.text());
+                if (result.length) {
+                    downtimeSheetUrl = candidate;
+                    return result;
+                }
+            } catch (e) { continue; }
+        }
+        downtimeSheetUrl = '';
+        return [];
+    }
+
+    async function loadDataFromCsv(csvUrl = DATA_SOURCE_CANDIDATES[0]) {
         const sourceUrls = csvUrl
             ? [csvUrl, ...DATA_SOURCE_CANDIDATES.filter(url => url !== csvUrl)]
             : DATA_SOURCE_CANDIDATES;
@@ -755,7 +902,8 @@ function syncAvailabilityForDate(referenceDate) {
                     continue;
                 }
 
-                diasAgosto = [...parsed.diasAgosto];
+setSheetLabels(parsed.labels);
+diasAgosto = [...parsed.diasAgosto];
                 dw7A = [...parsed.dw7A];
                 dw7B = [...parsed.dw7B];
                 obsDw7A = [...parsed.obsDw7A];
@@ -766,7 +914,10 @@ function syncAvailabilityForDate(referenceDate) {
                 nitroData = [...parsed.nitroData];
                 extraData = extractExtraColumns(csvText);
 
-const downtimeFromSource = buildDowntimeStateFromCsv(csvText);
+let downtimeFromSource = buildDowntimeStateFromCsv(csvText);
+if (!downtimeFromSource.length) {
+downtimeFromSource = await findDowntimeInOtherSheets(url);
+}
 if (downtimeFromSource.length) {
 downtimeData.length = 0;
 downtimeData.push(...downtimeFromSource);
@@ -781,7 +932,8 @@ downtimeComments.push(...downtimeFromSource);
                 updateDataSourceStatus(`Fonte ativa: ${sourceLabel} • ${new Date().toLocaleString('pt-BR')}`);
                 populateBaseDataTable();
                 applyDateFilters();
-                return true;
+refreshPanelLabels();
+return true;
             } catch (error) {
                 continue;
             }
@@ -1862,7 +2014,8 @@ detailsHtml,
             const existing = document.getElementById('reportPrintArea');
             if (existing) existing.remove();
             document.body.insertAdjacentHTML('beforeend', reportContent);
-            window.print();
+refreshPanelLabels(false);
+window.print();
         });
     }
 
@@ -1875,10 +2028,18 @@ if (dateStart) dateStart.addEventListener('change', applyDateFilters);
     if (dateEnd) dateEnd.addEventListener('change', applyDateFilters);
     if (blocoFilter) blocoFilter.addEventListener('change', applyDateFilters);
 
-    loadDataFromCsv();
-setInterval(() => {
-    loadDataFromCsv();
-}, AUTO_REFRESH_INTERVAL_MS);
+let csvLoading = false;
+const refreshFromSource = async () => {
+    if (csvLoading) return;
+    csvLoading = true;
+    try { await loadDataFromCsv(); } finally { csvLoading = false; }
+};
+refreshFromSource();
+setInterval(refreshFromSource, AUTO_REFRESH_INTERVAL_MS);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshFromSource();
+});
+window.addEventListener('focus', refreshFromSource);
 }
 
 if (typeof module !== 'undefined') {
@@ -1891,6 +2052,8 @@ if (typeof module !== 'undefined') {
         buildDataStateFromCsv,
         extractExtraColumns,
         extractColumnUnit,
+        setSheetLabels,
+        applySheetLabels,
         formatChartValueWithUnit,
         getDailyBoilerConsumption,
     };
