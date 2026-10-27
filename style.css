@@ -160,6 +160,14 @@ th, td { padding: 12px 20px; text-align: left; border-bottom: 1px solid #ecf0f1;
 .daily-card-water-dark i, .daily-card-water-dark h4, .daily-card-water-dark strong { color: #ffffff; }
 .daily-card-chlorine { background: #d9f99d; border-color: #a3e635; }
 .daily-card-chlorine i, .daily-card-chlorine h4, .daily-card-chlorine strong { color: #3f6212; }
+.daily-card-chlorine-blocks { background: #ecfccb; border-color: #bef264; flex: 1.5 1 270px; }
+.daily-card-chlorine-blocks > i, .daily-card-chlorine-blocks h4 { color: #4d7c0f; }
+.daily-card-wells { background: #cffafe; border-color: #67e8f9; flex: 1.5 1 270px; }
+.daily-card-wells > i, .daily-card-wells h4 { color: #0e7490; }
+.daily-measure-content { flex: 1; min-width: 0; }
+.daily-measure-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; }
+.daily-measure-values span { display: flex; flex-direction: column; gap: 2px; color: #475569; font-size: 11px; font-weight: 600; }
+.daily-measure-values strong { font-size: 13px; color: #1e293b; }
 .daily-card-boilers { background: #fef3c7; border-color: #fcd34d; flex: 2 1 360px; }
 .daily-card-boilers > i, .daily-card-boilers h4 { color: #a16207; }
 .daily-boiler-content { flex: 1; min-width: 0; }

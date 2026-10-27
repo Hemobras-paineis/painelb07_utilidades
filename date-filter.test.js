@@ -4,12 +4,15 @@ const {
   normalizeDateValue,
   resolveBlockSeries,
   parseCsvText,
+  extractChlorineSeries,
   buildDataStateFromCsv,
   parseNumberValue,
   extractExtraColumns,
   extractColumnUnit,
   formatChartValueWithUnit,
-  getDailyBoilerConsumption
+  getDailyBoilerConsumption,
+  getDailyColumnValues,
+  getDailyChlorineValues
 } = require('./script.js');
 
 assert.strictEqual(normalizeDateValue('2026-08-01'), '2026-08-01');
@@ -80,5 +83,36 @@ assert.deepStrictEqual(
   getDailyBoilerConsumption(boilerData.columns, boilerData.rows, '22/10/2026'),
   { b07Caldeira02: '--', b07Caldeira03: '--', b10Caldeira01: '--', b10Caldeira02: '--' }
 );
+
+const wellsCsv = [
+  'DATA,"CONSUMO DO POÇO 1 (m³)","CONSUMO DO POÇO 2 (m³)","CONSUMO DO POÇO 3 (m³)"',
+  '23/10/2026,"120,5","98,0","-"'
+].join('\n');
+const wellsData = extractExtraColumns(wellsCsv);
+assert.deepStrictEqual(
+  getDailyColumnValues(wellsData.columns, wellsData.rows, '23/10/2026', [
+    { key: 'poco1', pattern: /pocos?[^0-9]*0?1(?:$|[^0-9])/ },
+    { key: 'poco2', pattern: /pocos?[^0-9]*0?2(?:$|[^0-9])/ },
+    { key: 'poco3', pattern: /pocos?[^0-9]*0?3(?:$|[^0-9])/ }
+  ]),
+  { poco1: '120,5 m³', poco2: '98,0 m³', poco3: '-' }
+);
+assert.deepStrictEqual(
+  getDailyChlorineValues([
+    { name: 'TESTE DE CLORO - B07', values: [1.25] },
+    { name: 'TESTE DE CLORO - B12', values: [null] },
+    { name: 'TESTE DE CLORO - B14', values: [2] }
+  ], 0),
+  { b07: '1.25 ppm', b12: '--', b14: '2.00 ppm' }
+);
+const chlorineSeries = extractChlorineSeries([
+  'DATA,"B07 TESTE DE CLORO","B12 TESTE DE CLORO","B14 TESTE DE CLORO"',
+  '23/10/2026,"1,25","1,50","2,00"'
+].join('\n'));
+assert.deepStrictEqual(getDailyChlorineValues(chlorineSeries, 0), {
+  b07: '1.25 ppm',
+  b12: '1.50 ppm',
+  b14: '2.00 ppm'
+});
 
 console.log('date-filter.test.js: OK');

@@ -206,7 +206,7 @@ function extractChlorineSeries(csvText) {
     };
     const series = [];
     norm.forEach((header, index) => {
-        if (!/^(testedecloro|testecloro|cloro)/.test(header)) return;
+        if (!/^(testedecloro|testecloro|cloro|b(?:07|12|14).*cloro)/.test(header)) return;
         const hasReteste = (norm[index + 1] || '').startsWith('reteste');
         series.push({
             name: cells[index].replace(/\s+/g, ' ').trim(),
@@ -456,6 +456,38 @@ function getDailyBoilerConsumption(columns, rows, date) {
         values[key] = rawValue
             ? formatChartValueWithUnit(rawValue, column.unit)
             : '--';
+    });
+
+    return values;
+}
+
+function getDailyColumnValues(columns, rows, date, selectors) {
+    const normalizedDate = normalizeDateValue(date);
+    const row = rows.find(item => normalizeDateValue(item.date) === normalizedDate);
+    const values = {};
+
+    selectors.forEach(({ key, pattern }) => {
+        const column = columns.find(item => pattern.test(normalizeCsvHeader(item.label)));
+        const rawValue = column && row ? row.values[column.key] : '';
+        values[key] = rawValue
+            ? formatChartValueWithUnit(rawValue, column.unit)
+            : '--';
+    });
+
+    return values;
+}
+
+function getDailyChlorineValues(series, index) {
+    const targets = ['b07', 'b12', 'b14'];
+    const values = Object.fromEntries(targets.map(target => [target, '--']));
+
+    series.forEach(item => {
+        const normalizedName = normalizeCsvHeader(item.name);
+        const target = targets.find(block => normalizedName.includes(block));
+        const value = item.values[index];
+        if (target && value !== null && value !== undefined) {
+            values[target] = `${Number(value).toFixed(2)} ppm`;
+        }
     });
 
     return values;
@@ -736,24 +768,55 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
     let cloroSeries = [];
     const getChlorineSeries = () => cloroSeries.length
         ? cloroSeries
-        : [{ name: 'Teste de Cloro', retesteName: 'Reteste', values: cloroPpm.map((v) => (v > 0 ? v : null)), reteste: retestePpm }];
+        : [{ name: 'Teste de Cloro', retesteName: 'Reteste', values: cloroPpm.map((v) => (v !== null && v !== undefined ? v : null)), reteste: retestePpm }];
     const chlorineColors = ['#34495e', '#8e44ad', '#16a085', '#2980b9', '#d35400'];
+    const chlorineSeriesColor = (name, index) => {
+        const normalizedName = normalizeCsvHeader(name);
+        if (normalizedName.includes('b07')) return '#0369a1';
+        if (normalizedName.includes('b12')) return '#7e22ce';
+        if (normalizedName.includes('b14')) return '#b45309';
+        return chlorineColors[index % chlorineColors.length];
+    };
     const selectedChlorineIndexes = (selectedModules) => {
         const all = getChlorineSeries().map((_, k) => k);
         if (!selectedModules || selectedModules.includes('all') || selectedModules.includes('cloro')) return all;
         return all.filter((k) => selectedModules.includes(`cloro:${k}`));
     };
-    const chlorineLabelStyle = (color, large, align) => ({
-        display: 'auto', color, align, anchor: align === 'bottom' ? 'start' : 'end', offset: large ? 8 : 5, clamp: true,
-        backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: large ? 3 : 2,
-        font: { weight: 'bold', size: large ? 16 : 10 }, formatter: (value) => (value === null || value === undefined ? '' : Number(value).toFixed(2))
+    const chlorineLabelStyle = (color, large, placement) => ({
+        display: true,
+        color,
+        align: placement === 'alternate'
+            ? (context) => context.dataIndex % 2 === 0 ? 'top' : 'bottom'
+            : placement === 'horizontal'
+                ? (context) => context.dataIndex % 2 === 0 ? 'right' : 'left'
+                : placement,
+        anchor: placement === 'horizontal'
+            ? 'center'
+            : placement === 'bottom' ? 'start' : 'end',
+        offset: large ? 10 : 6,
+        clamp: true,
+        backgroundColor: '#ffffff',
+        borderColor: color,
+        borderWidth: 1,
+        borderRadius: 3,
+        padding: large ? 4 : 3,
+        font: { weight: 'bold', size: large ? 13 : 10 },
+        formatter: (value) => (value === null || value === undefined ? '' : Number(value).toFixed(2))
     });
     const chlorineDatasets = (indexList, large, allowed = null) => {
         const datasets = [];
         getChlorineSeries().forEach((serie, k) => {
             if (allowed && !allowed.includes(k)) return;
-            const color = chlorineColors[k % chlorineColors.length];
-            datasets.push({ label: serie.name, data: indexList.map((i) => serie.values[i] ?? null), borderColor: color, backgroundColor: color, borderWidth: large ? 3 : 2, fill: false, tension: 0.1, spanGaps: true, pointRadius: large ? 5 : 3, datalabels: chlorineLabelStyle(color, large, k % 2 === 0 ? 'top' : 'bottom') });
+            const color = chlorineSeriesColor(serie.name, k);
+            const normalizedName = normalizeCsvHeader(serie.name);
+            const labelPlacement = normalizedName.includes('b14')
+                ? 'horizontal'
+                : normalizedName.includes('b12')
+                    ? 'top'
+                    : normalizedName.includes('b07')
+                        ? 'bottom'
+                        : 'alternate';
+            datasets.push({ label: serie.name, data: indexList.map((i) => serie.values[i] ?? null), borderColor: color, backgroundColor: color, borderWidth: large ? 3 : 2, fill: false, tension: 0.1, spanGaps: true, pointRadius: large ? 5 : 3, datalabels: chlorineLabelStyle(color, large, labelPlacement) });
             if (serie.reteste.some((v) => v !== null && v !== undefined)) {
                 const suffix = (serie.name.match(/[-–]\s*(.+)$/) || [])[1];
                 datasets.push({ label: serie.retesteName ? (suffix ? `${serie.retesteName} - ${suffix}` : serie.retesteName) : 'Reteste', data: indexList.map((i) => serie.reteste[i] ?? null), borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: large ? 6 : 5, pointStyle: 'rectRot', spanGaps: false, showLine: false, fill: false, datalabels: chlorineLabelStyle('#d35400', large, 'right') });
@@ -763,7 +826,10 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
         datasets.push({ label: 'Limite superior (2,00)', isLimit: true, data: indexList.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false });
         return datasets;
     };
-    const hasChlorineData = (i) => getChlorineSeries().some((s) => (s.values[i] ?? 0) > 0 || (s.reteste[i] !== null && s.reteste[i] !== undefined));
+    const hasChlorineData = (i) => getChlorineSeries().some((s) =>
+        (s.values[i] !== null && s.values[i] !== undefined) ||
+        (s.reteste[i] !== null && s.reteste[i] !== undefined)
+    );
     let extraData = { columns: [], rows: [] };
     const extraCharts = [];
     const dashboardBoilerCharts = [];
@@ -1345,7 +1411,6 @@ function populateBaseDataTable() {
         const summaryTarget = document.getElementById('dailyNitro');
         const summaryDw7A = document.getElementById('dailyDw7a');
         const summaryDw7B = document.getElementById('dailyDw7b');
-        const summaryCloro = document.getElementById('dailyCloro');
         const dateBadge = document.getElementById('dailyDateBadge');
 const boilerConsumption = {
     b07Caldeira02: document.getElementById('dailyGasB07Boiler02'),
@@ -1353,8 +1418,18 @@ const boilerConsumption = {
     b10Caldeira01: document.getElementById('dailyGasB10Boiler01'),
     b10Caldeira02: document.getElementById('dailyGasB10Boiler02')
 };
+const chlorineByBlock = {
+    b07: document.getElementById('dailyCloroB07'),
+    b12: document.getElementById('dailyCloroB12'),
+    b14: document.getElementById('dailyCloroB14')
+};
+const wellConsumption = {
+    poco1: document.getElementById('dailyPoco1'),
+    poco2: document.getElementById('dailyPoco2'),
+    poco3: document.getElementById('dailyPoco3')
+};
 
-        if (!summaryTarget || !summaryDw7A || !summaryDw7B || !summaryCloro) {
+        if (!summaryTarget || !summaryDw7A || !summaryDw7B) {
             return;
         }
 
@@ -1366,8 +1441,13 @@ const boilerConsumption = {
             summaryTarget.innerText = '--';
             summaryDw7A.innerText = '--';
             summaryDw7B.innerText = '--';
-            summaryCloro.innerText = '--';
 Object.values(boilerConsumption).forEach(element => {
+    if (element) element.innerText = '--';
+});
+Object.values(chlorineByBlock).forEach(element => {
+    if (element) element.innerText = '--';
+});
+Object.values(wellConsumption).forEach(element => {
     if (element) element.innerText = '--';
 });
 if (dateBadge) dateBadge.innerText = todayLabel;
@@ -1384,17 +1464,27 @@ return;
         };
         const nitroRef = pickReference((i) => nitrogenNivel[i] > 0);
         const dwRef = pickReference((i) => dw7A[i] > 0 || dw7B[i] > 0);
-        const cloroRef = pickReference((i) => cloroPpm[i] > 0);
 
         summaryTarget.innerText = nitroRef >= 0 ? nitrogenNivel[nitroRef].toFixed(1) + ' pol' : '--';
         summaryDw7A.innerText = dwRef >= 0 ? dw7A[dwRef].toFixed(1) + ' m³' : '--';
         summaryDw7B.innerText = dwRef >= 0 ? dw7B[dwRef].toFixed(1) + ' m³' : '--';
-        summaryCloro.innerText = cloroRef >= 0 ? cloroPpm[cloroRef].toFixed(2) + ' ppm' : '--';
 
         if (dateBadge) dateBadge.innerText = displayDate;
 const dailyGasValues = getDailyBoilerConsumption(extraData.columns, extraData.rows, displayDate);
 Object.entries(boilerConsumption).forEach(([key, element]) => {
     if (element) element.innerText = dailyGasValues[key];
+});
+const dailyChlorineValues = getDailyChlorineValues(getChlorineSeries(), referenceIndex);
+Object.entries(chlorineByBlock).forEach(([key, element]) => {
+    if (element) element.innerText = dailyChlorineValues[key];
+});
+const dailyWellValues = getDailyColumnValues(extraData.columns, extraData.rows, displayDate, [
+    { key: 'poco1', pattern: /pocos?[^0-9]*0?1(?:$|[^0-9])/ },
+    { key: 'poco2', pattern: /pocos?[^0-9]*0?2(?:$|[^0-9])/ },
+    { key: 'poco3', pattern: /pocos?[^0-9]*0?3(?:$|[^0-9])/ }
+]);
+Object.entries(wellConsumption).forEach(([key, element]) => {
+    if (element) element.innerText = dailyWellValues[key];
 });
 
         // Encontrar parada mais recente de utilidade
@@ -1707,7 +1797,6 @@ renderFilteredTables(labels, indexes);
     document.getElementById('dailyNitro').innerText = nitrogenNivel[initialIndex].toFixed(1) + ' pol';
     document.getElementById('dailyDw7a').innerText = dw7A[initialIndex].toFixed(1) + ' m³';
     document.getElementById('dailyDw7b').innerText = dw7B[initialIndex].toFixed(1) + ' m³';
-    document.getElementById('dailyCloro').innerText = cloroPpm[initialIndex].toFixed(2) + ' ppm';
     const dailyDateBadge = document.getElementById('dailyDateBadge');
     if (dailyDateBadge) dailyDateBadge.innerText = diasAgosto[initialIndex] || todayLabel;
 
@@ -1756,7 +1845,7 @@ window.setIndispChartTvFonts = (isTv) => {
 
     const chlorineChartTvCanvas = document.getElementById('chlorineChartTv');
     if (chlorineChartTvCanvas) {
-    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 20 }, autoSkip: true } }, y: { min: 0, suggestedMax: 3.5, ticks: { font: { size: 20 }, stepSize: 0.5, callback: (v) => Number(v).toFixed(1) } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
+    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 12 }, autoSkip: false, minRotation: 45, maxRotation: 60 } }, y: { min: 0, suggestedMax: 3.5, ticks: { font: { size: 20 }, stepSize: 0.5, callback: (v) => Number(v).toFixed(1) } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 12 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
         window.chlorineChartTv = chlorineChartTv;
     }
 
@@ -2156,10 +2245,13 @@ normalizeDateValue,
         resolveBlockSeries,
         parseCsvText,
         parseNumberValue,
+extractChlorineSeries,
         buildDataStateFromCsv,
         extractExtraColumns,
         extractColumnUnit,
         formatChartValueWithUnit,
         getDailyBoilerConsumption,
+        getDailyColumnValues,
+        getDailyChlorineValues,
     };
 }
