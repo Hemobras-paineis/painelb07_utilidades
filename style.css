@@ -105,6 +105,11 @@ body.sidebar-collapsed .sidebar-nav li.active a { border-left-width: 3px; }
 .chart-card h3 { font-size: 16px; color: #34495e; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ecf0f1; text-align: center; }
 .chart-wrapper { position: relative; height: 280px; width: 100%; flex: 1; }
 .chart-wrapper.small-chart { height: 260px; } /* Gráficos menores no Dashboard Geral */
+.gn-b07-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); align-content: start; }
+.tv-mode-active .gn-b07-grid { height: calc(100vh - 80px); padding: 16px 24px; gap: 16px; align-content: stretch; }
+.tv-mode-active .gn-b07-grid .chart-card { margin: 0; padding: 16px 20px; display: flex; flex-direction: column; min-height: 0; }
+.tv-mode-active .gn-b07-grid .chart-card h3 { font-size: 24px; padding-bottom: 8px; margin-bottom: 8px; }
+.tv-mode-active .gn-b07-grid .chart-wrapper { height: auto !important; flex: 1; min-height: 0; }
 
 .reference-section { flex: 1; display: flex; flex-direction: column; min-height: 250px; }
 .table-card { background: white; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); display: flex; flex-direction: column; height: 100%; overflow: hidden; }

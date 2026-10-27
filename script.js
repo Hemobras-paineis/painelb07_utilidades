@@ -417,13 +417,20 @@ function extractExtraColumns(csvText) {
     });
 
     const columns = extras.filter(col => parsedLines.some(values => (values[col.index] || '').trim()));
-    const rows = [...byDate.entries()].map(([date, values]) => ({ date, values }));
+    const rows = [...byDate.entries()]
+        .map(([date, values]) => ({ date, values }))
+        .sort((a, b) => normalizeDateValue(a.date).localeCompare(normalizeDateValue(b.date)));
     return { columns, rows };
 }
 
 function extractColumnUnit(label) {
     const match = String(label || '').trim().match(/\(\(([^()]*)\)\)\s*$|\(([^()]*)\)\s*$|\[([^\]]+)\]\s*$/);
     return (match?.[1] || match?.[2] || match?.[3] || '').trim();
+}
+
+function isGnB07Column(col) {
+    const key = normalizeCsvHeader(col.label);
+    return Boolean(col.numeric) && /b07/.test(key) && /caldeira0?[23]($|[^0-9])/.test(key) && /caldeira|gn|gasnatural/.test(key);
 }
 
 function formatChartValueWithUnit(rawValue, unit) {
@@ -589,10 +596,16 @@ const getExtraIcon = (col) => {
    if (match) return match[1];
    return col.numeric ? 'fa-chart-line' : 'fa-table-columns';
 };
-const getTvViews = () => [
-   ...tvViews,
-   ...extraData.columns.filter(col => col.numeric).map(col => ({ id: getExtraViewId(col), title: col.label }))
-];
+let tvModeKind = 'standard';
+const getTvViews = () => {
+   const numeric = extraData.columns.filter(col => col.numeric);
+   if (tvModeKind === 'full') {
+      return [...tvViews, ...numeric.map(col => ({ id: getExtraViewId(col), title: col.label }))];
+   }
+   const views = [...tvViews];
+   if (numeric.some(isGnB07Column)) views.push({ id: 'view-gn-b07', title: 'Consumo de GN - B07 (Caldeiras 02 e 03)' });
+   return views;
+};
     const TIME_PER_SLIDE = 20000;
 const TV_DAYS_RANGE = 7; // Dia atual + 6 dias anteriores
 const btnTvMode = document.getElementById('btnTvMode');
@@ -627,11 +640,15 @@ preTvDateFilter = null;
 applyDateFilters();
 }
 
-function toggleTvMode() {
+const btnTvModeFull = document.getElementById('btnTvModeFull');
+const TV_BUTTON_IDLE_HTML = { standard: '<i class="fas fa-tv"></i> Iniciar Modo TV', full: '<i class="fas fa-th"></i> Modo TV Completo' };
+
+function toggleTvMode(kind = 'standard') {
 isTvModeActive = !isTvModeActive;
 if (isTvModeActive) {
+tvModeKind = kind === 'full' ? 'full' : 'standard';
 document.body.classList.add('tv-mode-active');
-btnTvMode.innerHTML = '<i class="fas fa-stop"></i> Parar TV';
+(tvModeKind === 'full' ? btnTvModeFull : btnTvMode).innerHTML = '<i class="fas fa-stop"></i> Parar TV';
 
 applyTvDateFilter();
 try {
@@ -643,7 +660,8 @@ startTvCarousel();
 if (window.setIndispChartTvFonts) window.setIndispChartTvFonts(true);
 } else {
 document.body.classList.remove('tv-mode-active');
-btnTvMode.innerHTML = '<i class="fas fa-tv"></i> Iniciar Modo TV';
+btnTvMode.innerHTML = TV_BUTTON_IDLE_HTML.standard;
+if (btnTvModeFull) btnTvModeFull.innerHTML = TV_BUTTON_IDLE_HTML.full;
 stopTvCarousel();
 restorePreTvDateFilter();
 if (window.setIndispChartTvFonts) window.setIndispChartTvFonts(false);
@@ -651,14 +669,15 @@ setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
 }
 }
 
-btnTvMode.addEventListener('click', toggleTvMode);
+btnTvMode.addEventListener('click', () => toggleTvMode('standard'));
+if (btnTvModeFull) btnTvModeFull.addEventListener('click', () => toggleTvMode('full'));
 
 document.addEventListener('keydown', (event) => {
     if (event.key !== '*') return;
     if (event.repeat) return;
     const target = event.target;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
-    toggleTvMode();
+    toggleTvMode('standard');
 });
 
     function animateTvProgress() {
@@ -719,14 +738,25 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
         ? cloroSeries
         : [{ name: 'Teste de Cloro', retesteName: 'Reteste', values: cloroPpm.map((v) => (v > 0 ? v : null)), reteste: retestePpm }];
     const chlorineColors = ['#34495e', '#8e44ad', '#16a085', '#2980b9', '#d35400'];
-    const chlorineDatasets = (indexList, large) => {
+    const selectedChlorineIndexes = (selectedModules) => {
+        const all = getChlorineSeries().map((_, k) => k);
+        if (!selectedModules || selectedModules.includes('all') || selectedModules.includes('cloro')) return all;
+        return all.filter((k) => selectedModules.includes(`cloro:${k}`));
+    };
+    const chlorineLabelStyle = (color, large, align) => ({
+        display: 'auto', color, align, anchor: align === 'bottom' ? 'start' : 'end', offset: large ? 8 : 5, clamp: true,
+        backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: large ? 3 : 2,
+        font: { weight: 'bold', size: large ? 16 : 10 }, formatter: (value) => (value === null || value === undefined ? '' : Number(value).toFixed(2))
+    });
+    const chlorineDatasets = (indexList, large, allowed = null) => {
         const datasets = [];
         getChlorineSeries().forEach((serie, k) => {
+            if (allowed && !allowed.includes(k)) return;
             const color = chlorineColors[k % chlorineColors.length];
-            datasets.push({ label: serie.name, data: indexList.map((i) => serie.values[i] ?? null), borderColor: color, backgroundColor: color, borderWidth: large ? 3 : 2, fill: false, tension: 0.1, spanGaps: true, pointRadius: large ? 5 : 3 });
+            datasets.push({ label: serie.name, data: indexList.map((i) => serie.values[i] ?? null), borderColor: color, backgroundColor: color, borderWidth: large ? 3 : 2, fill: false, tension: 0.1, spanGaps: true, pointRadius: large ? 5 : 3, datalabels: chlorineLabelStyle(color, large, k % 2 === 0 ? 'top' : 'bottom') });
             if (serie.reteste.some((v) => v !== null && v !== undefined)) {
                 const suffix = (serie.name.match(/[-–]\s*(.+)$/) || [])[1];
-                datasets.push({ label: serie.retesteName ? (suffix ? `${serie.retesteName} - ${suffix}` : serie.retesteName) : 'Reteste', data: indexList.map((i) => serie.reteste[i] ?? null), borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: large ? 6 : 5, pointStyle: 'rectRot', spanGaps: false, showLine: false, fill: false });
+                datasets.push({ label: serie.retesteName ? (suffix ? `${serie.retesteName} - ${suffix}` : serie.retesteName) : 'Reteste', data: indexList.map((i) => serie.reteste[i] ?? null), borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: large ? 6 : 5, pointStyle: 'rectRot', spanGaps: false, showLine: false, fill: false, datalabels: chlorineLabelStyle('#d35400', large, 'right') });
             }
         });
         datasets.push({ label: 'Limite inferior (1,00)', isLimit: true, data: indexList.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false });
@@ -879,6 +909,7 @@ downtimeComments.push(...downtimeFromSource);
                 const sourceLabel = url.includes('docs.google.com') ? 'Google Sheets' : url.includes('painelb07') ? 'CSV local' : 'CSV fallback';
                 updateDataSourceStatus(`Fonte ativa: ${sourceLabel} • ${new Date().toLocaleString('pt-BR')}`);
                 populateBaseDataTable();
+renderChlorineModuleOptions();
 applyDateFilters();
 return true;
             } catch (error) {
@@ -900,8 +931,9 @@ return true;
                 renderAvailabilityView();
         updateDataSourceStatus('Google Sheets indisponível; exibindo dados locais temporariamente');
         populateBaseDataTable();
-        applyDateFilters();
-        return false;
+renderChlorineModuleOptions();
+applyDateFilters();
+return false;
     }
 
     function getCsvValue(row, keys) {
@@ -994,6 +1026,31 @@ return true;
             input.onchange = null;
         });
     }
+
+function renderChlorineModuleOptions() {
+    const menu = document.getElementById('reportModuleFilter');
+    const container = menu?.querySelector('.multi-select-menu');
+    const base = menu?.querySelector('input[value="cloro"]')?.parentElement;
+    if (!container || !base) return;
+    const previous = new Set([...menu.querySelectorAll('input[value^="cloro:"]')].filter((i) => i.checked).map((i) => i.value));
+    menu.querySelectorAll('label[data-chloro]').forEach((label) => label.remove());
+    const series = getChlorineSeries();
+    if (series.length < 2) return;
+    let anchor = base;
+    series.forEach((serie, k) => {
+        const label = document.createElement('label');
+        label.dataset.chloro = '1';
+        label.style.paddingLeft = '18px';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = `cloro:${k}`;
+        input.checked = previous.has(input.value);
+        label.append(input, ` ${serie.name}`);
+        anchor.after(label);
+        anchor = label;
+    });
+    updateReportModuleSummary();
+}
 
 function getSelectedReportModules() {
     const menu = document.getElementById('reportModuleFilter');
@@ -1125,16 +1182,21 @@ function renderExtraColumnsView() {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    layout: { padding: isGas ? { top: 70, right: 40 } : 0 },
+                    layout: { padding: isGas ? { top: 70, right: 40 } : { top: 30, right: 24 } },
                     plugins: {
                         legend: { display: false },
                         datalabels: {
+                            display: 'auto',
+                            clamp: true,
                             color: '#34495e',
-                            font: { weight: 'bold', size: isGas ? 16 : 10 },
+                            backgroundColor: 'rgba(255,255,255,0.85)',
+                            borderRadius: 3,
+                            padding: 2,
+                            font: { weight: 'bold', size: isGas ? 16 : 11 },
                             textAlign: 'center',
                             anchor: 'end',
                             align: 'top',
-                            offset: 4,
+                            offset: 6,
                             formatter: (value, context) => formatChartValueWithUnit(
                                 visibleRows[context.dataIndex]?.values[col.key],
                                 col.unit
@@ -1142,8 +1204,9 @@ function renderExtraColumnsView() {
                         }
                     },
                     scales: {
-                        x: { ticks: { font: { size: isGas ? 16 : 12 } } },
+                        x: { ticks: { font: { size: isGas ? 16 : 12 }, maxRotation: 60, autoSkip: true } },
                         y: {
+                            grace: '20%',
                             ticks: { font: { size: isGas ? 16 : 12 } },
                             title: { display: Boolean(col.unit), text: col.unit, font: { size: isGas ? 16 : 12 } }
                         }
@@ -1152,19 +1215,21 @@ function renderExtraColumnsView() {
             }) });
         }
 
-        if (boilerContainer && col.numeric && /caldeira/.test(normalizeCsvHeader(col.label)) && typeof Chart !== 'undefined') {
+        if (boilerContainer && col.numeric && /caldeira|poco/.test(normalizeCsvHeader(col.label)) && typeof Chart !== 'undefined') {
             const card = document.createElement('div');
             card.className = 'chart-card';
             card.innerHTML = `<h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper small-chart"><canvas></canvas></div>`;
             boilerContainer.appendChild(card);
             const color = palette[i % palette.length];
+            const withValue = visibleRows.filter(row => String(row.values[col.key] ?? '').trim() !== '');
+            const boilerRows = dateStart && dateEnd ? withValue : withValue.slice(-DASHBOARD_RECENT_DAYS);
             dashboardBoilerCharts.push(new Chart(card.querySelector('canvas'), {
                 type: 'line',
                 data: {
-                    labels: visibleRows.map(row => row.date),
+                    labels: boilerRows.map(row => row.date),
                     datasets: [{
                         label: col.label,
-                        data: visibleRows.map(row => parseNumberValue(row.values[col.key])),
+                        data: boilerRows.map(row => parseNumberValue(row.values[col.key])),
                         borderColor: color,
                         backgroundColor: color,
                         tension: 0.3
@@ -1177,7 +1242,12 @@ function renderExtraColumnsView() {
                     plugins: {
                         legend: { display: false },
                         datalabels: {
+                            display: 'auto',
+                            clamp: true,
                             color: '#34495e',
+                            backgroundColor: 'rgba(255,255,255,0.85)',
+                            borderRadius: 3,
+                            padding: 2,
                             font: { weight: 'bold', size: 10 },
                             anchor: 'end',
                             align: 'top',
@@ -1185,11 +1255,39 @@ function renderExtraColumnsView() {
                             formatter: (value) => Number.isFinite(value) ? String(value).replace('.', ',') : ''
                         }
                     },
-                    scales: { y: { grace: '12%', title: { display: Boolean(col.unit), text: col.unit } } }
+                    scales: { x: { ticks: { maxRotation: 60, autoSkip: true } }, y: { grace: '20%', title: { display: Boolean(col.unit), text: col.unit } } }
                 }
             }));
         }
     });
+
+    const gnColumns = columns.filter(isGnB07Column);
+    if (gnColumns.length && typeof Chart !== 'undefined') {
+        const gnView = document.createElement('div');
+        gnView.id = 'view-gn-b07';
+        gnView.className = 'view-section';
+        gnView.innerHTML = '<div class="module-container gn-b07-grid">' + gnColumns.map(col => `<div class="chart-card tv-chart"><h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper"><canvas data-key="${escapeHtml(col.key)}"></canvas></div></div>`).join('') + '</div>';
+        container.appendChild(gnView);
+        gnColumns.forEach((col) => {
+            const color = palette[columns.indexOf(col) % palette.length];
+            const gnRows = filtered.indexes.map(index => rows[index]).filter(row => String(row.values[col.key] ?? '').trim() !== '');
+            const canvas = [...gnView.querySelectorAll('canvas')].find(item => item.dataset.key === col.key);
+            dashboardBoilerCharts.push(new Chart(canvas, {
+                type: 'line',
+                data: { labels: gnRows.map(row => row.date), datasets: [{ label: col.label, data: gnRows.map(row => parseNumberValue(row.values[col.key])), borderColor: color, backgroundColor: color, borderWidth: 3, pointRadius: 5, tension: 0.3 }] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: { padding: { top: 36, right: 30 } },
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: { display: 'auto', clamp: true, color: '#34495e', backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: 2, font: { weight: 'bold', size: 16 }, anchor: 'end', align: 'top', offset: 6, formatter: (value) => Number.isFinite(value) ? String(value).replace('.', ',') : '' }
+                    },
+                    scales: { x: { ticks: { font: { size: 16 }, autoSkip: true } }, y: { grace: '20%', ticks: { font: { size: 16 } }, title: { display: Boolean(col.unit), text: col.unit, font: { size: 16 } } } }
+                }
+            }));
+        });
+    }
 
     if (activeBefore) {
         const stillExists = document.getElementById(activeBefore);
@@ -1565,8 +1663,9 @@ nitrogenChart.update();
 
 const chlorineChart = window.chlorineChart;
 if (chlorineChart) {
+chlorineChart.$indexes = cloroRecent;
 chlorineChart.data.labels = labelsOf(cloroRecent);
-chlorineChart.data.datasets = chlorineDatasets(cloroRecent, false);
+chlorineChart.data.datasets = chlorineDatasets(cloroRecent, false, selectedChlorineIndexes(getSelectedReportModules()));
 chlorineChart.update();
 }
 
@@ -1590,7 +1689,7 @@ nitrogenChartTv.data.labels = labelsOf(nitroIndexes);
         const chlorineChartTv = window.chlorineChartTv;
         if (chlorineChartTv) {
 chlorineChartTv.data.labels = labelsOf(cloroIndexes);
-chlorineChartTv.data.datasets = chlorineDatasets(cloroIndexes, true);
+chlorineChartTv.data.datasets = chlorineDatasets(cloroIndexes, true, selectedChlorineIndexes(getSelectedReportModules()));
 chlorineChartTv.update();
 }
 
@@ -1618,7 +1717,7 @@ renderFilteredTables(labels, indexes);
     const nitrogenChart = new Chart(document.getElementById('nitrogenChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Nitrogênio (pol)', data: nitrogenNivel, borderColor: '#9b59b6', backgroundColor: 'rgba(155, 89, 182, 0.2)', fill: true, tension: 0.3 }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { grace: '12%' } }, plugins: { legend: { display: false }, datalabels: { color: '#9b59b6', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(1), anchor: 'end', align: 'top', offset: 5 } } } });
     window.nitrogenChart = nitrogenChart;
 
-    const chlorineChart = new Chart(document.getElementById('chlorineChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', fill: false, tension: 0.1 }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 5, pointHoverRadius: 6, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } }, scales: { y: { suggestedMin: 0, suggestedMax: 3 } }, plugins: { legend: { display: true }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 5 } } } });
+    const chlorineChart = new Chart(document.getElementById('chlorineChart').getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', fill: false, tension: 0.1 }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 5, pointHoverRadius: 6, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24, right: 16 } },     scales: { y: { min: 0, suggestedMax: 3.5, ticks: { stepSize: 0.5, callback: (v) => Number(v).toFixed(1) }, title: { display: true, text: 'ppm' } }, x: { ticks: { maxRotation: 60, autoSkip: true } } }, plugins: { legend: { display: true }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 10 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 5 } } } });
     window.chlorineChart = chlorineChart;
 
     const dispCanvas = document.getElementById('dispChart');
@@ -1657,7 +1756,7 @@ window.setIndispChartTvFonts = (isTv) => {
 
     const chlorineChartTvCanvas = document.getElementById('chlorineChartTv');
     if (chlorineChartTvCanvas) {
-    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 20 } } }, y: { suggestedMin: 0, suggestedMax: 3, ticks: { font: { size: 20 } } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
+    const chlorineChartTv = new Chart(chlorineChartTvCanvas.getContext('2d'), { type: 'line', data: { labels: diasAgosto, datasets: [{ label: 'Teste de Cloro', data: cloroPpm, borderColor: '#34495e', borderWidth: 2, fill: false, tension: 0.1, pointBackgroundColor: ctx => { const value = ctx.dataset.data[ctx.dataIndex]; return (value < 1 || value > 2) ? '#e74c3c' : '#3498db'; } }, { label: 'Reteste', data: retestePpm, borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: 6, pointHoverRadius: 7, spanGaps: false, fill: false, tension: 0 }, { label: 'Limite inferior (1,00)', isLimit: true, data: diasAgosto.map(() => 1), borderColor: '#27ae60', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }, { label: 'Limite superior (2,00)', isLimit: true, data: diasAgosto.map(() => 2), borderColor: '#e74c3c', borderWidth: 2, borderDash: [8, 5], pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { font: { size: 20 }, autoSkip: true } }, y: { min: 0, suggestedMax: 3.5, ticks: { font: { size: 20 }, stepSize: 0.5, callback: (v) => Number(v).toFixed(1) } } }, plugins: { legend: { labels: { font: { size: 20 } } }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null, color: '#34495e', font: { weight: 'bold', size: 18 }, formatter: (value) => value.toFixed(2), anchor: 'end', align: 'top', offset: 8 } } } });
         window.chlorineChartTv = chlorineChartTv;
     }
 
@@ -1724,9 +1823,13 @@ const moduleTitles = {
     cloro: 'Teste de Cloro'
 };
 const getModuleTitle = (moduleKey) => {
+    const chlorineMatch = /^cloro:(\d+)$/.exec(moduleKey);
+    if (chlorineMatch) return 'Cloro - ' + (getChlorineSeries()[Number(chlorineMatch[1])]?.name || moduleKey);
     const extra = extraData.columns.find((col) => 'extra:' + col.key === moduleKey);
     return extra ? extra.label : (moduleTitles[moduleKey] || moduleKey);
 };
+const reportModules = [...new Set(selectedModules.map((key) => (key.startsWith('cloro:') ? 'cloro' : key)))];
+const chlorineSelected = selectedChlorineIndexes(selectedModules);
 const moduleTitle = isAllModules ? moduleTitles.all : selectedModules.map(getModuleTitle).join(', ');
 const extraReportHtml = (() => {
     const { columns, rows } = extraData;
@@ -1799,7 +1902,22 @@ return matchesBlock && itemDate >= start && itemDate <= end;
             };
             const reportYear = String(endDate || startDate || '').split('-')[0] || 'N/D';
             const reportPeriod = `${formatReportDate(startDate)} a ${formatReportDate(endDate)} de ${reportYear}`;
-            const cloroOutOfRangeCount = filteredCloro.filter((value) => value < 1 || value > 2).length;
+            const cloroOutOfRangeCount = (() => {
+    let count = 0;
+    chlorineSelected.forEach((k) => filteredLabels.forEach((label) => {
+        const value = getChlorineSeries()[k].values[diasAgosto.indexOf(label)];
+        if (value !== null && value !== undefined && (value < 1 || value > 2)) count += 1;
+    }));
+    return count;
+})();
+const avgChlorineSelected = (() => {
+    const values = [];
+    chlorineSelected.forEach((k) => filteredLabels.forEach((label) => {
+        const value = getChlorineSeries()[k].values[diasAgosto.indexOf(label)];
+        if (value !== null && value !== undefined && value > 0) values.push(value);
+    }));
+    return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+})();
             const filteredObs7A = filteredLabels.map((label) => obsDw7A[diasAgosto.indexOf(label)] || '');
             const filteredObs7B = filteredLabels.map((label) => obsDw7B[diasAgosto.indexOf(label)] || '');
             const dwSeries7A = [
@@ -1852,13 +1970,23 @@ return matchesBlock && itemDate >= start && itemDate <= end;
 const chartImageSpecs = [
 { module: ['dw7a', 'dw7b'], chart: window.dwChart, title: 'Consumo de Água (DW 7A / DW 7B)' },
 { module: 'nitrogenio', chart: window.nitrogenChart, title: 'Nível de Nitrogênio' },
-{ module: 'cloro', chart: window.chlorineChart, title: 'Monitoramento de Cloro' },
+{ module: 'cloro', chart: window.chlorineChart, title: 'Monitoramento de Cloro', getImage: () => {
+    const chart = window.chlorineChart;
+    if (!chart) return '';
+    const original = chart.data.datasets;
+    chart.data.datasets = chlorineDatasets(chart.$indexes || [], false, chlorineSelected);
+    chart.update('none');
+    const image = chart.toBase64Image('image/png', 1);
+    chart.data.datasets = original;
+    chart.update('none');
+    return image;
+} },
 { module: 'indisponibilidade', chart: window.indispChart, title: 'Indisponibilidade das Utilidades (Horas)' },
 ...extraCharts.map((item) => ({ module: 'extra:' + item.key, chart: item.chart, title: item.chart.data.datasets[0].label }))
 ];
 const chartsHtml = chartImageSpecs
-.filter((spec) => (isAllModules || [].concat(spec.module).some((key) => selectedModules.includes(key))) && spec.chart && typeof spec.chart.toBase64Image === 'function')
-.map((spec) => ({ ...spec, image: spec.chart.toBase64Image('image/png', 1) }))
+.filter((spec) => (isAllModules || [].concat(spec.module).some((key) => reportModules.includes(key))) && spec.chart && typeof spec.chart.toBase64Image === 'function')
+.map((spec) => ({ ...spec, image: spec.getImage ? spec.getImage() : spec.chart.toBase64Image('image/png', 1) }))
 .filter((spec) => spec.image && spec.image.length > 100)
 .map((spec) => {
     const image = spec.image;
@@ -1882,7 +2010,7 @@ const summaryItemsByModule = {
         '<div><span>Último reabastecimento</span><strong>' + (latestRefill ? latestRefill.r + ' pol em ' + latestRefill.d : 'Nenhum no período') + '</strong></div>'
     ],
     cloro: [
-        '<div><span>Média de cloro</span><strong>' + avgCloro.toFixed(2) + ' ppm</strong></div>',
+        '<div><span>Média de cloro</span><strong>' + avgChlorineSelected.toFixed(2) + ' ppm</strong></div>',
         '<div><span>Testes fora do limite (1,00–2,00 ppm)</span><strong>' + cloroOutOfRangeCount + '</strong></div>'
     ],
     availability: [
@@ -1907,7 +2035,7 @@ const allSummaryHtml = [
     '<div><span>Paradas registradas</span><strong>' + downtimeInRange.length + '</strong></div>'
 ].join('');
 const summaryHtml = '<h3 class="report-section-title">Resumo Operacional</h3><div class="report-summary-grid">' +
-    (isAllModules ? allSummaryHtml : selectedModules.map((key) => (summaryItemsByModule[key] || []).join('')).join('')) +
+    (isAllModules ? allSummaryHtml : reportModules.map((key) => (summaryItemsByModule[key] || []).join('')).join('')) +
     '</div>';
 
 const allDetailsHtml = [
@@ -1953,12 +2081,19 @@ const moduleDetailsHtml = {
     ].join(''),
     cloro: [
         '<h3 class="report-section-title">Testes de Cloro e Limites de Controle no Período</h3>',
-        '<table class="report-table"><thead><tr><th>Data</th><th>Limite inferior (ppm)</th><th>Teste (ppm)</th><th>Limite superior (ppm)</th><th>Reteste (ppm)</th><th>Resultado</th></tr></thead><tbody>',
+        '<table class="report-table"><thead><tr><th>Data</th><th>Teste</th><th>Limite inferior (ppm)</th><th>Teste (ppm)</th><th>Limite superior (ppm)</th><th>Reteste (ppm)</th><th>Resultado</th></tr></thead><tbody>',
         filteredLabels.map((label) => {
             const idx = diasAgosto.indexOf(label);
-            const reteste = retestePpm[idx] === null || retestePpm[idx] === undefined ? '-' : Number(retestePpm[idx]).toFixed(2);
-            const result = cloroPpm[idx] < 1 || cloroPpm[idx] > 2 ? 'Fora do limite' : 'Dentro do limite';
-            return '<tr><td>' + label + '</td><td>1,00</td><td>' + Number(cloroPpm[idx] || 0).toFixed(2) + '</td><td>2,00</td><td>' + reteste + '</td><td>' + result + '</td></tr>';
+            return chlorineSelected.map((k) => {
+                const serie = getChlorineSeries()[k];
+                const value = serie.values[idx];
+                const reteste = serie.reteste[idx];
+                const hasValue = value !== null && value !== undefined;
+                const hasReteste = reteste !== null && reteste !== undefined;
+                if (!hasValue && !hasReteste) return '';
+                const result = hasValue ? (value < 1 || value > 2 ? 'Fora do limite' : 'Dentro do limite') : '-';
+                return '<tr><td>' + label + '</td><td>' + escapeHtml(serie.name) + '</td><td>1,00</td><td>' + (hasValue ? value.toFixed(2) : '-') + '</td><td>2,00</td><td>' + (hasReteste ? reteste.toFixed(2) : '-') + '</td><td>' + result + '</td></tr>';
+            }).join('');
         }).join(''),
         '</tbody></table>'
     ].join(''),
@@ -1972,7 +2107,7 @@ const moduleDetailsHtml = {
 extraData.columns.forEach((col, index) => {
     moduleDetailsHtml['extra:' + col.key] = extraReportHtml[index];
 });
-const detailsHtml = isAllModules ? allDetailsHtml : selectedModules.map((key) => moduleDetailsHtml[key] || '').join('');
+const detailsHtml = isAllModules ? allDetailsHtml : reportModules.map((key) => moduleDetailsHtml[key] || '').join('');
 
 const reportContent = [
 '<div id="reportPrintArea">',
