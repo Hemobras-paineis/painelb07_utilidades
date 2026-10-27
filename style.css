@@ -351,3 +351,19 @@ body { background-color: #f8f3f5; color: #3d1320; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: #f1f1f1; }
 ::-webkit-scrollbar-thumb { background: #bdc3c7; border-radius: 4px; }
+
+.chlorine-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.chlorine-block { border: 1px solid #eee; border-radius: 8px; padding: 8px; }
+.chlorine-block h4 { margin: 0 0 6px; text-align: center; font-size: 0.95rem; }
+.chlorine-block .chlorine-block-canvas { position: relative; height: 260px; }
+.chlorine-blocks-tv .chlorine-block .chlorine-block-canvas { height: 340px; }
+.chlorine-offscreen { position: absolute; left: -10000px; top: 0; width: 900px; height: 350px; pointer-events: none; }
+.tv-mode-active:not(.tv-mode-full) #chlorineBlocksTv .chlorine-block:not([data-block="b07"]) { display: none; }
+.tv-mode-active #chlorineBlocksTv { grid-template-columns: 1fr; }
+.tv-mode-active #chlorineBlocksTv .chlorine-block .chlorine-block-canvas { height: 56vh; }
+.tv-mode-full #chlorineBlocksTv { gap: 8px; }
+.tv-mode-full #chlorineBlocksTv .chlorine-block { padding: 4px 8px; }
+.tv-mode-full #chlorineBlocksTv .chlorine-block h4 { margin: 0 0 2px; font-size: 1rem; }
+.tv-mode-active.tv-mode-full #chlorineBlocksTv .chlorine-block .chlorine-block-canvas { height: 25vh; }
+.tv-mode-full #view-cloro .tv-chart > h3 { display: none; }
+.tv-mode-full #view-cloro .tv-chart { padding: 8px 16px; }

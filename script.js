@@ -680,6 +680,7 @@ isTvModeActive = !isTvModeActive;
 if (isTvModeActive) {
 tvModeKind = kind === 'full' ? 'full' : 'standard';
 document.body.classList.add('tv-mode-active');
+document.body.classList.toggle('tv-mode-full', tvModeKind === 'full');
 (tvModeKind === 'full' ? btnTvModeFull : btnTvMode).innerHTML = '<i class="fas fa-stop"></i> Parar TV';
 
 applyTvDateFilter();
@@ -691,7 +692,7 @@ try {
 startTvCarousel();
 if (window.setIndispChartTvFonts) window.setIndispChartTvFonts(true);
 } else {
-document.body.classList.remove('tv-mode-active');
+document.body.classList.remove('tv-mode-active', 'tv-mode-full');
 btnTvMode.innerHTML = TV_BUTTON_IDLE_HTML.standard;
 if (btnTvModeFull) btnTvModeFull.innerHTML = TV_BUTTON_IDLE_HTML.full;
 stopTvCarousel();
@@ -810,13 +811,17 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
             const color = chlorineSeriesColor(serie.name, k);
             const normalizedName = normalizeCsvHeader(serie.name);
             const labelPlacement = normalizedName.includes('b14')
-                ? 'horizontal'
+                ? 'top'
                 : normalizedName.includes('b12')
                     ? 'top'
                     : normalizedName.includes('b07')
                         ? 'bottom'
                         : 'alternate';
-            datasets.push({ label: serie.name, data: indexList.map((i) => serie.values[i] ?? null), borderColor: color, backgroundColor: color, borderWidth: large ? 3 : 2, fill: false, tension: 0.1, spanGaps: true, pointRadius: large ? 5 : 3, datalabels: chlorineLabelStyle(color, large, labelPlacement) });
+            const labelStyle = chlorineLabelStyle(color, large, labelPlacement);
+            if (normalizedName.includes('b14')) {
+                Object.assign(labelStyle, { backgroundColor: color, color: '#ffffff', borderColor: '#ffffff', offset: large ? 18 : 14, padding: large ? 5 : 4, font: { weight: 'bold', size: large ? 15 : 12 } });
+            }
+            datasets.push({ label: serie.name, data: indexList.map((i) => serie.values[i] ?? null), borderColor: color, backgroundColor: color, borderWidth: large ? 3 : 2, fill: false, tension: 0.1, spanGaps: true, pointRadius: large ? 5 : 3, datalabels: labelStyle });
             if (serie.reteste.some((v) => v !== null && v !== undefined)) {
                 const suffix = (serie.name.match(/[-–]\s*(.+)$/) || [])[1];
                 datasets.push({ label: serie.retesteName ? (suffix ? `${serie.retesteName} - ${suffix}` : serie.retesteName) : 'Reteste', data: indexList.map((i) => serie.reteste[i] ?? null), borderColor: '#f39c12', backgroundColor: '#f39c12', borderWidth: 2, pointRadius: large ? 6 : 5, pointStyle: 'rectRot', spanGaps: false, showLine: false, fill: false, datalabels: chlorineLabelStyle('#d35400', large, 'right') });
@@ -825,6 +830,56 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
         datasets.push({ label: 'Limite inferior (1,00)', isLimit: true, data: indexList.map(() => 1), borderColor: '#27ae60', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false });
         datasets.push({ label: 'Limite superior (2,00)', isLimit: true, data: indexList.map(() => 2), borderColor: '#e74c3c', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, fill: false });
         return datasets;
+    };
+    const blockChlorineCharts = {};
+    const renderChlorineBlocks = (containerId, indexList, large, allowed) => {
+        const container = document.getElementById(containerId);
+        if (!container || typeof Chart === 'undefined') return;
+        const series = getChlorineSeries();
+        const ids = series.map((_, k) => k).filter((k) => !allowed || allowed.includes(k));
+        const signature = ids.map((k) => `${k}:${series[k].name}`).join('|');
+        if (container.dataset.signature !== signature) {
+            Object.keys(blockChlorineCharts).filter((key) => key.startsWith(`${containerId}:`)).forEach((key) => {
+                blockChlorineCharts[key].destroy();
+                delete blockChlorineCharts[key];
+            });
+            container.innerHTML = '';
+            ids.forEach((k) => {
+                const block = document.createElement('div');
+                block.className = 'chlorine-block';
+                block.dataset.block = normalizeCsvHeader(series[k].name).includes('b07') ? 'b07' : 'other';
+                const title = document.createElement('h4');
+                title.textContent = series[k].name;
+                const wrap = document.createElement('div');
+                wrap.className = 'chlorine-block-canvas';
+                const canvas = document.createElement('canvas');
+                wrap.appendChild(canvas);
+                block.append(title, wrap);
+                container.appendChild(block);
+                blockChlorineCharts[`${containerId}:${k}`] = new Chart(canvas.getContext('2d'), {
+                    type: 'line',
+                    data: { labels: [], datasets: [] },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        layout: { padding: { top: 28, right: large ? 40 : 28 } },
+                        scales: {
+                            y: { min: 0, suggestedMax: 3.5, ticks: { stepSize: 0.5, font: { size: large ? 12 : 11 }, callback: (v) => Number(v).toFixed(1) }, title: { display: !large, text: 'ppm' } },
+                            x: { ticks: { font: { size: large ? 11 : 10 }, maxRotation: large ? 0 : 60, autoSkip: !large } }
+                        },
+                        plugins: { legend: { display: true, labels: { boxWidth: 18, boxHeight: 8, font: { size: large ? 11 : 11 }, filter: (item) => !String(item.text).startsWith('Limite') } }, datalabels: { display: (context) => !context.dataset.isLimit && context.dataset.data[context.dataIndex] !== null } }
+                    }
+                });
+            });
+            container.dataset.signature = signature;
+        }
+        ids.forEach((k) => {
+            const chart = blockChlorineCharts[`${containerId}:${k}`];
+            if (!chart) return;
+            chart.data.labels = indexList.map((i) => diasAgosto[i]);
+            chart.data.datasets = chlorineDatasets(indexList, large, [k]);
+            chart.update();
+        });
     };
     const hasChlorineData = (i) => getChlorineSeries().some((s) =>
         (s.values[i] !== null && s.values[i] !== undefined) ||
@@ -1758,6 +1813,8 @@ chlorineChart.data.labels = labelsOf(cloroRecent);
 chlorineChart.data.datasets = chlorineDatasets(cloroRecent, false, selectedChlorineIndexes(getSelectedReportModules()));
 chlorineChart.update();
 }
+renderChlorineBlocks('chlorineBlocks', cloroRecent, false, selectedChlorineIndexes(getSelectedReportModules()));
+renderChlorineBlocks('chlorineBlocksTv', cloroIndexes, true, selectedChlorineIndexes(getSelectedReportModules()));
 
 const dwChartTv = window.dwChartTv;
 if (dwChartTv) {

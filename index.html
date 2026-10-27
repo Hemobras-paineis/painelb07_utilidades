@@ -198,9 +198,10 @@
                             <canvas id="nitrogenChart"></canvas>
                         </div>
                     </div>
-                    <div class="chart-card">
+                    <div class="chart-card" style="grid-column: 1 / -1;">
                         <h3>Monitoramento de Cloro</h3>
-                        <div class="chart-wrapper small-chart">
+                        <div id="chlorineBlocks" class="chlorine-blocks"></div>
+                        <div class="chlorine-offscreen" aria-hidden="true">
                             <canvas id="chlorineChart"></canvas>
                         </div>
                     </div>
@@ -307,7 +308,7 @@
                 <div class="module-container">
                     <div class="chart-card tv-chart">
                         <h3>Monitoramento de Cloro (ppm) vs Limites de Controle</h3>
-                        <div class="chart-wrapper"><canvas id="chlorineChartTv"></canvas></div>
+                        <div id="chlorineBlocksTv" class="chlorine-blocks chlorine-blocks-tv"></div>
                     </div>
                     <section class="reference-section tv-hide">
                         <div class="table-card">
