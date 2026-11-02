@@ -43,8 +43,8 @@ const obsCsv = [
   '02/08/2026,"14,9",,"158,2",,"137,2"'
 ].join('\n');
 const parsedObs = buildDataStateFromCsv(obsCsv);
-assert.deepStrictEqual(parsedObs.obsDw7A, ['obs A', '']);
-assert.deepStrictEqual(parsedObs.obsDw7B, ['obs B', '']);
+assert.strictEqual(parsedObs.obsDw7A, undefined);
+assert.strictEqual(extractExtraColumns(obsCsv).columns.length, 0);
 assert.deepStrictEqual(parsedObs.dw7A, [167.3, 158.2]);
 
 const multilineHeaderCsv = [
