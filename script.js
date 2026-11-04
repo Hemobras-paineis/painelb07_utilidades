@@ -1511,12 +1511,12 @@ function renderExtraColumnsView() {
                             font: { size: 10 }
                         }
                     },
-                    y: { stacked: true, beginAtZero: true, grace: '20%', title: { display: true, text: wellColumns[0].unit || 'm³' } }
+                    y: { stacked: true, beginAtZero: true, grace: '20%', title: { display: true, text: 'm³' } }
                 },
                 plugins: {
                     legend: { display: true },
                     datalabels: {
-                        display: 'auto',
+                        display: true,
                         clamp: true,
                         color: (context) => context.dataset.type === 'line' ? '#1f78d1' : '#0f172a',
                         font: { weight: 'bold', size: 10 },
