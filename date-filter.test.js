@@ -12,6 +12,9 @@ const {
   formatChartValueWithUnit,
   getDailyBoilerConsumption,
   getDailyColumnValues,
+  getLatestColumnValues,
+  getLatestBoilerConsumption,
+  formatDisplayDate,
   getDailyChlorineValues
 } = require('./script.js');
 
@@ -96,6 +99,22 @@ assert.deepStrictEqual(
     { key: 'poco3', pattern: /pocos?[^0-9]*0?3(?:$|[^0-9])/ }
   ]),
   { poco1: '120,5 m³', poco2: '98,0 m³', poco3: '-' }
+);
+assert.strictEqual(formatDisplayDate('23/10/2026'), '23/10/2026');
+assert.deepStrictEqual(
+  getLatestColumnValues(wellsData.columns, wellsData.rows, [
+    { key: 'poco1', pattern: /pocos?[^0-9]*0?1(?:$|[^0-9])/ }
+  ]),
+  { poco1: { value: '120,5 m³', date: '23/10/2026' } }
+);
+assert.deepStrictEqual(
+  getLatestBoilerConsumption(boilerData.columns, boilerData.rows),
+  {
+    b07Caldeira02: { value: '75,0 Nm³/h', date: '23/10/2026' },
+    b07Caldeira03: { value: '--', date: '' },
+    b10Caldeira01: { value: '45,2 Nm³/h', date: '23/10/2026' },
+    b10Caldeira02: { value: '44,8 Nm³/h', date: '23/10/2026' }
+  }
 );
 assert.deepStrictEqual(
   getDailyChlorineValues([

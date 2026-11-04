@@ -478,6 +478,41 @@ function getDailyColumnValues(columns, rows, date, selectors) {
     return values;
 }
 
+function formatDisplayDate(date) {
+    const normalized = normalizeDateValue(date);
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : String(date || '');
+}
+
+function getLatestColumnValues(columns, rows, selectors) {
+    const values = {};
+
+    selectors.forEach(({ key, pattern }) => {
+        const column = columns.find(item => pattern.test(normalizeCsvHeader(item.label)));
+        const latestRow = column && [...rows].reverse().find((row) => {
+            const rawValue = row.values[column.key];
+            return rawValue !== undefined && rawValue !== null && String(rawValue).trim() !== '' &&
+                !['-', '—'].includes(String(rawValue).trim());
+        });
+        const rawValue = column && latestRow ? latestRow.values[column.key] : '';
+        values[key] = {
+            value: rawValue ? formatChartValueWithUnit(rawValue, column.unit) : '--',
+            date: latestRow ? formatDisplayDate(latestRow.date) : ''
+        };
+    });
+
+    return values;
+}
+
+function getLatestBoilerConsumption(columns, rows) {
+    return getLatestColumnValues(columns, rows, [
+        { key: 'b07Caldeira02', pattern: /b07caldeira0?2/ },
+        { key: 'b07Caldeira03', pattern: /b07caldeira0?3/ },
+        { key: 'b10Caldeira01', pattern: /b10caldeira0?1/ },
+        { key: 'b10Caldeira02', pattern: /b10caldeira0?2/ }
+    ]);
+}
+
 function getDailyChlorineValues(series, index) {
     const targets = ['b07', 'b12', 'b14'];
     const values = Object.fromEntries(targets.map(target => [target, '--']));
@@ -1367,7 +1402,7 @@ function renderExtraColumnsView() {
             }) });
         }
 
-        if (boilerContainer && col.numeric && /caldeira|poco/.test(normalizeCsvHeader(col.label)) && typeof Chart !== 'undefined') {
+        if (boilerContainer && col.numeric && /caldeira/.test(normalizeCsvHeader(col.label)) && typeof Chart !== 'undefined') {
             const card = document.createElement('div');
             card.className = 'chart-card';
             card.innerHTML = `<h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper small-chart"><canvas></canvas></div>`;
@@ -1412,6 +1447,80 @@ function renderExtraColumnsView() {
             }));
         }
     });
+
+    const wellColumns = columns.filter((col) => /pocos?/.test(normalizeCsvHeader(col.label)));
+    if (boilerContainer && wellColumns.length && typeof Chart !== 'undefined') {
+        const wellRowsWithValues = filtered.indexes
+            .map(index => rows[index])
+            .filter(row => wellColumns.some(col => String(row.values[col.key] ?? '').trim() !== ''));
+        const wellRows = dateStart && dateEnd
+            ? wellRowsWithValues
+            : wellRowsWithValues.slice(-DASHBOARD_RECENT_DAYS);
+        const totalValues = wellRows.map(row => wellColumns.reduce(
+            (total, col) => total + parseNumberValue(row.values[col.key]),
+            0
+        ));
+        const card = document.createElement('div');
+        card.className = 'chart-card wells-total-chart';
+        card.innerHTML = '<h3>Consumo dos Poços - Total e por Poço</h3><div class="chart-wrapper small-chart"><canvas></canvas></div>';
+        boilerContainer.appendChild(card);
+
+        const wellColors = ['#38bdf8', '#14b8a6', '#0ea5e9'];
+        const barDatasets = wellColumns.map((col, index) => ({
+            type: 'bar',
+            label: col.label,
+            data: wellRows.map(row => parseNumberValue(row.values[col.key])),
+            backgroundColor: wellColors[index % wellColors.length],
+            borderColor: wellColors[index % wellColors.length],
+            borderWidth: 1,
+            stack: 'wells'
+        }));
+        dashboardBoilerCharts.push(new Chart(card.querySelector('canvas'), {
+            type: 'bar',
+            data: {
+                labels: wellRows.map(row => row.date),
+                datasets: [
+                    ...barDatasets,
+                    {
+                        type: 'line',
+                        label: 'Total dos 3 poços',
+                        data: totalValues,
+                        borderColor: '#1f78d1',
+                        backgroundColor: '#1f78d1',
+                        pointBackgroundColor: '#1f78d1',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        borderWidth: 3,
+                        tension: 0.2,
+                        order: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: { padding: { top: 30, right: 20 } },
+                scales: {
+                    x: { stacked: true, ticks: { maxRotation: 60, autoSkip: true } },
+                    y: { stacked: true, beginAtZero: true, grace: '20%', title: { display: true, text: wellColumns[0].unit || 'm³' } }
+                },
+                plugins: {
+                    legend: { display: true },
+                    datalabels: {
+                        display: 'auto',
+                        clamp: true,
+                        color: (context) => context.dataset.type === 'line' ? '#1f78d1' : '#0f172a',
+                        font: { weight: 'bold', size: 10 },
+                        anchor: (context) => context.dataset.type === 'line' ? 'end' : 'center',
+                        align: (context) => context.dataset.type === 'line' ? 'top' : 'center',
+                        offset: 4,
+                        formatter: (value) => Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 1 })
+                    }
+                }
+            }
+        }));
+    }
 
     const gnColumns = columns.filter(isGnB07Column);
     if (gnColumns.length && typeof Chart !== 'undefined') {
@@ -1499,10 +1608,10 @@ function populateBaseDataTable() {
         const summaryDw7B = document.getElementById('dailyDw7b');
         const dateBadge = document.getElementById('dailyDateBadge');
 const boilerConsumption = {
-    b07Caldeira02: document.getElementById('dailyGasB07Boiler02'),
-    b07Caldeira03: document.getElementById('dailyGasB07Boiler03'),
-    b10Caldeira01: document.getElementById('dailyGasB10Boiler01'),
-    b10Caldeira02: document.getElementById('dailyGasB10Boiler02')
+    b07Caldeira02: document.getElementById('latestGasB07Boiler02'),
+    b07Caldeira03: document.getElementById('latestGasB07Boiler03'),
+    b10Caldeira01: document.getElementById('latestGasB10Boiler01'),
+    b10Caldeira02: document.getElementById('latestGasB10Boiler02')
 };
 const chlorineByBlock = {
     b07: document.getElementById('dailyCloroB07'),
@@ -1510,9 +1619,18 @@ const chlorineByBlock = {
     b14: document.getElementById('dailyCloroB14')
 };
 const wellConsumption = {
-    poco1: document.getElementById('dailyPoco1'),
-    poco2: document.getElementById('dailyPoco2'),
-    poco3: document.getElementById('dailyPoco3')
+    poco1: document.getElementById('latestPoco1'),
+    poco2: document.getElementById('latestPoco2'),
+    poco3: document.getElementById('latestPoco3')
+};
+const latestConsumptionDates = {
+    poco1: document.getElementById('latestPoco1Date'),
+    poco2: document.getElementById('latestPoco2Date'),
+    poco3: document.getElementById('latestPoco3Date'),
+    b07Caldeira02: document.getElementById('latestGasB07Boiler02Date'),
+    b07Caldeira03: document.getElementById('latestGasB07Boiler03Date'),
+    b10Caldeira01: document.getElementById('latestGasB10Boiler01Date'),
+    b10Caldeira02: document.getElementById('latestGasB10Boiler02Date')
 };
 
         if (!summaryTarget || !summaryDw7A || !summaryDw7B) {
@@ -1556,9 +1674,10 @@ return;
         summaryDw7B.innerText = dwRef >= 0 ? dw7B[dwRef].toFixed(1) + ' m³' : '--';
 
         if (dateBadge) dateBadge.innerText = displayDate;
-const dailyGasValues = getDailyBoilerConsumption(extraData.columns, extraData.rows, displayDate);
+const latestGasValues = getLatestBoilerConsumption(extraData.columns, extraData.rows);
 Object.entries(boilerConsumption).forEach(([key, element]) => {
-    if (element) element.innerText = dailyGasValues[key];
+    if (element) element.innerText = latestGasValues[key].value;
+    if (latestConsumptionDates[key]) latestConsumptionDates[key].innerText = latestGasValues[key].date ? `Data: ${latestGasValues[key].date}` : '';
 });
 const dailyChlorineValues = getDailyChlorineValues(getChlorineSeries(), referenceIndex);
 const dailyChlorineRetests = getDailyChlorineRetests(getChlorineSeries(), referenceIndex);
@@ -1573,13 +1692,14 @@ Object.entries(chlorineByBlock).forEach(([key, element]) => {
     }
     retestElement.textContent = dailyChlorineRetests[key] ? `Reteste: ${dailyChlorineRetests[key]}` : '';
 });
-const dailyWellValues = getDailyColumnValues(extraData.columns, extraData.rows, displayDate, [
+const latestWellValues = getLatestColumnValues(extraData.columns, extraData.rows, [
     { key: 'poco1', pattern: /pocos?[^0-9]*0?1(?:$|[^0-9])/ },
     { key: 'poco2', pattern: /pocos?[^0-9]*0?2(?:$|[^0-9])/ },
     { key: 'poco3', pattern: /pocos?[^0-9]*0?3(?:$|[^0-9])/ }
 ]);
 Object.entries(wellConsumption).forEach(([key, element]) => {
-    if (element) element.innerText = dailyWellValues[key];
+    if (element) element.innerText = latestWellValues[key].value;
+    if (latestConsumptionDates[key]) latestConsumptionDates[key].innerText = latestWellValues[key].date ? `Data: ${latestWellValues[key].date}` : '';
 });
 
         // Encontrar parada mais recente de utilidade
@@ -2361,6 +2481,9 @@ extractChlorineSeries,
         formatChartValueWithUnit,
         getDailyBoilerConsumption,
         getDailyColumnValues,
+        getLatestColumnValues,
+        getLatestBoilerConsumption,
+        formatDisplayDate,
         getDailyChlorineValues,
         getDailyChlorineRetests,
     };

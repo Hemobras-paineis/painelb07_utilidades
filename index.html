@@ -130,14 +130,29 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="daily-card daily-card-availability">
+                            <i class="fas fa-percent"></i>
+                            <div>
+                                <h4>Disponibilidade Diária das Utilidades</h4>
+                                <strong id="avgAvailability" style="color: #2ecc71;">--</strong>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="latest-consumption-container tv-hide">
+                    <div class="daily-summary-header">
+                        <h2><i class="fas fa-history"></i> Últimos Consumos Registrados</h2>
+                    </div>
+                    <div class="daily-cards">
                         <div class="daily-card daily-card-wells">
                             <i class="fas fa-water"></i>
                             <div class="daily-measure-content">
                                 <h4>Consumo de Poços</h4>
                                 <div class="daily-measure-values">
-                                    <span>Poço 1<strong id="dailyPoco1">--</strong></span>
-                                    <span>Poço 2<strong id="dailyPoco2">--</strong></span>
-                                    <span>Poço 3<strong id="dailyPoco3">--</strong></span>
+                                    <span>Poço 1<strong id="latestPoco1">--</strong><em id="latestPoco1Date" class="latest-date"></em></span>
+                                    <span>Poço 2<strong id="latestPoco2">--</strong><em id="latestPoco2Date" class="latest-date"></em></span>
+                                    <span>Poço 3<strong id="latestPoco3">--</strong><em id="latestPoco3Date" class="latest-date"></em></span>
                                 </div>
                             </div>
                         </div>
@@ -146,18 +161,11 @@
                             <div class="daily-boiler-content">
                                 <h4>Consumo de Gás Natural</h4>
                                 <div class="daily-boiler-values">
-                                    <span>B07 - Caldeira 02<strong id="dailyGasB07Boiler02">--</strong></span>
-                                    <span>B07 - Caldeira 03<strong id="dailyGasB07Boiler03">--</strong></span>
-                                    <span>B10 - Caldeira 01<strong id="dailyGasB10Boiler01">--</strong></span>
-                                    <span>B10 - Caldeira 02<strong id="dailyGasB10Boiler02">--</strong></span>
+                                    <span>B07 - Caldeira 02<strong id="latestGasB07Boiler02">--</strong><em id="latestGasB07Boiler02Date" class="latest-date"></em></span>
+                                    <span>B07 - Caldeira 03<strong id="latestGasB07Boiler03">--</strong><em id="latestGasB07Boiler03Date" class="latest-date"></em></span>
+                                    <span>B10 - Caldeira 01<strong id="latestGasB10Boiler01">--</strong><em id="latestGasB10Boiler01Date" class="latest-date"></em></span>
+                                    <span>B10 - Caldeira 02<strong id="latestGasB10Boiler02">--</strong><em id="latestGasB10Boiler02Date" class="latest-date"></em></span>
                                 </div>
-                            </div>
-                        </div>
-                        <div class="daily-card daily-card-availability">
-                            <i class="fas fa-percent"></i>
-                            <div>
-                                <h4>Disponibilidade Diária das Utilidades</h4>
-                                <strong id="avgAvailability" style="color: #2ecc71;">--</strong>
                             </div>
                         </div>
                     </div>
