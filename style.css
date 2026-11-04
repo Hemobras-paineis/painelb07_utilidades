@@ -183,7 +183,8 @@ th, td { padding: 12px 20px; text-align: left; border-bottom: 1px solid #ecf0f1;
 
 .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; padding: 0 30px 25px 30px; }
 .wells-total-chart { grid-column: 1 / -1; }
-.wells-total-chart .chart-wrapper { height: 520px; }
+.wells-total-chart { min-height: 620px; }
+.wells-total-chart .chart-wrapper { height: 560px; min-height: 560px; }
 
 .availability-panel { display: flex; flex-direction: column; gap: 18px; }
 .availability-summary { display: flex; justify-content: flex-end; }
@@ -213,6 +214,25 @@ th, td { padding: 12px 20px; text-align: left; border-bottom: 1px solid #ecf0f1;
 .tv-mode-active .chart-card { height: auto; border-radius: 15px; margin: auto 0; padding: 40px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
 .tv-mode-active .chart-card h3 { font-size: 26px; padding-bottom: 20px; margin-bottom: 20px; }
 .tv-mode-active .chart-wrapper { height: 60vh !important; }
+.tv-mode-active.tv-mode-full #view-dashboard > .dashboard:not(#dashboardBoilerCharts),
+.tv-mode-active.tv-mode-full #view-dashboard > .daily-summary-container,
+.tv-mode-active.tv-mode-full #view-dashboard > .kpi-container { display: none !important; }
+.tv-mode-active.tv-mode-full #view-dashboard #dashboardBoilerCharts {
+    display: grid;
+    grid-template-columns: 1fr;
+    height: calc(100vh - 80px);
+    padding: 30px;
+    gap: 0;
+}
+.tv-mode-active.tv-mode-full #view-dashboard .wells-total-chart {
+    height: calc(100vh - 140px);
+    margin: 0;
+}
+.tv-mode-active.tv-mode-full #view-dashboard .wells-total-chart .chart-wrapper {
+    height: auto !important;
+    flex: 1;
+    min-height: 0;
+}
 .tv-mode-active #view-disponibilidade { height: calc(100vh - 80px); }
 .tv-mode-active #view-disponibilidade .module-container { height: 100%; padding: 12px 20px 20px; }
 .tv-mode-active #view-disponibilidade .chart-card { height: calc(100vh - 100px); display: flex; flex-direction: column; justify-content: flex-start; padding: 18px 22px; }

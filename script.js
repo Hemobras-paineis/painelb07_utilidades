@@ -684,7 +684,9 @@ let tvModeKind = 'standard';
 const getTvViews = () => {
    const numeric = extraData.columns.filter(col => col.numeric);
    if (tvModeKind === 'full') {
-      return [...tvViews, ...numeric.map(col => ({ id: getExtraViewId(col), title: col.label }))];
+      const hasWellConsumption = extraData.columns.some((col) => /pocos?/.test(normalizeCsvHeader(col.label)));
+      const dashboardViews = hasWellConsumption ? [{ id: 'view-dashboard', title: 'Consumo dos Poços' }] : [];
+      return [...tvViews, ...dashboardViews, ...numeric.map(col => ({ id: getExtraViewId(col), title: col.label }))];
    }
    const views = [...tvViews];
    if (numeric.some(isGnB07Column)) views.push({ id: 'view-gn-b07', title: 'Consumo de GN - B07 (Caldeiras 02 e 03)' });
@@ -1402,50 +1404,6 @@ function renderExtraColumnsView() {
             }) });
         }
 
-        if (boilerContainer && col.numeric && /caldeira/.test(normalizeCsvHeader(col.label)) && typeof Chart !== 'undefined') {
-            const card = document.createElement('div');
-            card.className = 'chart-card';
-            card.innerHTML = `<h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper small-chart"><canvas></canvas></div>`;
-            boilerContainer.appendChild(card);
-            const color = palette[i % palette.length];
-            const withValue = visibleRows.filter(row => String(row.values[col.key] ?? '').trim() !== '');
-            const boilerRows = dateStart && dateEnd ? withValue : withValue.slice(-DASHBOARD_RECENT_DAYS);
-            dashboardBoilerCharts.push(new Chart(card.querySelector('canvas'), {
-                type: 'line',
-                data: {
-                    labels: boilerRows.map(row => row.date),
-                    datasets: [{
-                        label: col.label,
-                        data: boilerRows.map(row => parseNumberValue(row.values[col.key])),
-                        borderColor: color,
-                        backgroundColor: color,
-                        tension: 0.3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    layout: { padding: { top: 30, right: 20 } },
-                    plugins: {
-                        legend: { display: false },
-                        datalabels: {
-                            display: 'auto',
-                            clamp: true,
-                            color: '#34495e',
-                            backgroundColor: 'rgba(255,255,255,0.85)',
-                            borderRadius: 3,
-                            padding: 2,
-                            font: { weight: 'bold', size: 10 },
-                            anchor: 'end',
-                            align: 'top',
-                            offset: 4,
-                            formatter: (value) => Number.isFinite(value) ? String(value).replace('.', ',') : ''
-                        }
-                    },
-                    scales: { x: { ticks: { maxRotation: 60, autoSkip: true } }, y: { grace: '20%', title: { display: Boolean(col.unit), text: col.unit } } }
-                }
-            }));
-        }
     });
 
     const wellColumns = columns.filter((col) => /pocos?/.test(normalizeCsvHeader(col.label)));
@@ -1473,7 +1431,9 @@ function renderExtraColumnsView() {
             backgroundColor: wellColors[index % wellColors.length],
             borderColor: wellColors[index % wellColors.length],
             borderWidth: 1,
-            stack: 'wells'
+            stack: 'wells',
+            barThickness: 48,
+            maxBarThickness: 64
         }));
         dashboardBoilerCharts.push(new Chart(card.querySelector('canvas'), {
             type: 'bar',
@@ -1493,6 +1453,7 @@ function renderExtraColumnsView() {
                         pointRadius: 4,
                         borderWidth: 3,
                         tension: 0.2,
+                        yAxisID: 'yTotal',
                         order: 0
                     }
                 ]
@@ -1504,6 +1465,8 @@ function renderExtraColumnsView() {
                 scales: {
                     x: {
                         stacked: true,
+                        categoryPercentage: 0.9,
+                        barPercentage: 0.95,
                         ticks: {
                             minRotation: 45,
                             maxRotation: 60,
@@ -1511,14 +1474,18 @@ function renderExtraColumnsView() {
                             font: { size: 10 }
                         }
                     },
-                    y: { stacked: true, beginAtZero: true, grace: '20%', title: { display: true, text: 'm³' } }
+                    y: { stacked: true, beginAtZero: true, grace: '20%', title: { display: true, text: 'm³' } },
+                    yTotal: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { display: false }, title: { display: false } }
                 },
                 plugins: {
                     legend: { display: true },
                     datalabels: {
                         display: true,
                         clamp: true,
-                        color: (context) => context.dataset.type === 'line' ? '#1f78d1' : '#0f172a',
+                        color: (context) => context.dataset.type === 'line' ? '#1f78d1' : '#ffffff',
+                        backgroundColor: (context) => context.dataset.type === 'line' ? 'rgba(255,255,255,0.9)' : 'rgba(15,23,42,0.45)',
+                        borderRadius: 3,
+                        padding: 3,
                         font: { weight: 'bold', size: 10 },
                         anchor: (context) => context.dataset.type === 'line' ? 'end' : 'center',
                         align: (context) => context.dataset.type === 'line' ? 'top' : 'center',
