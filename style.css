@@ -183,6 +183,7 @@ th, td { padding: 12px 20px; text-align: left; border-bottom: 1px solid #ecf0f1;
 
 .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; padding: 0 30px 25px 30px; }
 .wells-total-chart { grid-column: 1 / -1; }
+.wells-total-chart .chart-wrapper { height: 380px; }
 
 .availability-panel { display: flex; flex-direction: column; gap: 18px; }
 .availability-summary { display: flex; justify-content: flex-end; }

@@ -1465,7 +1465,7 @@ function renderExtraColumnsView() {
         card.innerHTML = '<h3>Consumo dos Poços - Total e por Poço</h3><div class="chart-wrapper small-chart"><canvas></canvas></div>';
         boilerContainer.appendChild(card);
 
-        const wellColors = ['#38bdf8', '#14b8a6', '#0ea5e9'];
+        const wellColors = ['#93c5fd', '#3b82f6', '#1d4ed8'];
         const barDatasets = wellColumns.map((col, index) => ({
             type: 'bar',
             label: col.label,
@@ -1502,7 +1502,15 @@ function renderExtraColumnsView() {
                 maintainAspectRatio: false,
                 layout: { padding: { top: 30, right: 20 } },
                 scales: {
-                    x: { stacked: true, ticks: { maxRotation: 60, autoSkip: true } },
+                    x: {
+                        stacked: true,
+                        ticks: {
+                            minRotation: 45,
+                            maxRotation: 60,
+                            autoSkip: false,
+                            font: { size: 10 }
+                        }
+                    },
                     y: { stacked: true, beginAtZero: true, grace: '20%', title: { display: true, text: wellColumns[0].unit || 'm³' } }
                 },
                 plugins: {
@@ -2126,7 +2134,8 @@ const moduleTitles = {
     dw7b: 'DW 7B',
     nitrogenio: 'Nitrogênio',
     indisponibilidade: 'Indisponibilidade das Utilidades',
-    cloro: 'Teste de Cloro'
+    cloro: 'Teste de Cloro',
+    'wells-total': 'Consumo de Poço Total'
 };
 const getModuleTitle = (moduleKey) => {
     const chlorineMatch = /^cloro:(\d+)$/.exec(moduleKey);
@@ -2146,6 +2155,35 @@ const extraReportHtml = (() => {
         inRange.filter((row) => row.values[col.key] !== undefined).map((row) => '<tr><td>' + escapeHtml(row.date) + '</td><td>' + escapeHtml(row.values[col.key]) + '</td>' + (col.hasObs ? '<td class="report-obs">' + (escapeHtml(row.values[col.key + '__obs']) || '-') + '</td>' : '') + '</tr>').join(''),
         '</tbody></table>'
     ].join(''));
+})();
+
+const wellTotalReportHtml = (() => {
+    const { columns, rows } = extraData;
+    const wellColumns = columns.filter((col) => /pocos?/.test(normalizeCsvHeader(col.label)));
+    if (!wellColumns.length) return '';
+
+    const inRange = filterDateRange(rows.map((row) => row.date), startDate, endDate, DEFAULT_YEAR)
+        .indexes.map((index) => rows[index])
+        .filter((row) => wellColumns.some((col) => row.values[col.key] !== undefined));
+    const dailyTotals = inRange.map((row) => wellColumns.reduce(
+        (sum, col) => sum + parseNumberValue(row.values[col.key]),
+        0
+    ));
+    const average = dailyTotals.length
+        ? dailyTotals.reduce((sum, value) => sum + value, 0) / dailyTotals.length
+        : 0;
+
+    return [
+        '<h3 class="report-section-title">Consumo de Poço Total</h3>',
+        '<p><strong>Consumo médio diário no mês:</strong> ' + average.toFixed(1).replace('.', ',') + ' m³</p>',
+        '<table class="report-table"><thead><tr><th>Data</th>',
+        wellColumns.map((col) => '<th>' + escapeHtml(col.label) + '</th>').join(''),
+        '<th>Total dos 3 poços (m³)</th></tr></thead><tbody>',
+        inRange.map((row, index) => '<tr><td>' + escapeHtml(row.date) + '</td>' +
+            wellColumns.map((col) => '<td>' + (escapeHtml(row.values[col.key]) || '-') + '</td>').join('') +
+            '<td>' + dailyTotals[index].toFixed(1).replace('.', ',') + '</td></tr>').join(''),
+        '</tbody></table>'
+    ].join('');
 })();
 
             const filteredLabels = filterDateRange(diasAgosto, startDate, endDate).labels;
@@ -2340,6 +2378,11 @@ const summaryItemsByModule = {
         '<div><span>Última parada</span><strong>' + (latestDowntime ? latestDowntime.u + ' - ' + latestDowntime.h + ' em ' + latestDowntime.d : 'Nenhuma no período') + '</strong></div>',
         '<div><span>Paradas registradas</span><strong>' + downtimeInRange.length + '</strong></div>',
         '<div><span>Horas indisponíveis</span><strong>' + downtimeInRange.reduce((total, item) => total + parseNumberValue(item.h), 0).toFixed(1) + ' h</strong></div>'
+    ],
+    'wells-total': [
+        '<div><span>Consumo médio diário dos poços</span><strong>' +
+            (wellTotalReportHtml.match(/<strong>Consumo médio diário no mês:<\/strong>\s*([\d,]+) m³/)?.[1] || '0,0') +
+            ' m³</strong></div>'
     ]
 };
 const allSummaryHtml = [
@@ -2373,7 +2416,7 @@ const allDetailsHtml = [
     '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7A</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7B</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Nitrogênio</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Cloro</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Reteste</th></tr></thead>',
     '<tbody>' + rowsHtml + '</tbody>',
     '</table>',
-    extraReportHtml.join('')
+    extraReportHtml.join('') + wellTotalReportHtml
 ].join('');
 const moduleDetailsHtml = {
     availability: [
@@ -2420,7 +2463,8 @@ const moduleDetailsHtml = {
         '<table class="report-table"><thead><tr><th>Data</th><th>Utilidade</th><th>Paradas</th><th>Tempo indisponível</th><th>Comentário</th></tr></thead><tbody>',
         downtimeRowsHtml,
         '</tbody></table>'
-    ].join('')
+    ].join(''),
+    'wells-total': wellTotalReportHtml
 };
 extraData.columns.forEach((col, index) => {
     moduleDetailsHtml['extra:' + col.key] = extraReportHtml[index];
