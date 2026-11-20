@@ -8,6 +8,8 @@ const {
   buildDataStateFromCsv,
   parseNumberValue,
   extractExtraColumns,
+  extractObservations,
+  renderObservationsHtml,
   extractColumnUnit,
   formatChartValueWithUnit,
   getDailyBoilerConsumption,
@@ -49,6 +51,23 @@ const parsedObs = buildDataStateFromCsv(obsCsv);
 assert.strictEqual(parsedObs.obsDw7A, undefined);
 assert.strictEqual(extractExtraColumns(obsCsv).columns.length, 0);
 assert.deepStrictEqual(parsedObs.dw7A, [167.3, 158.2]);
+assert.deepStrictEqual(extractObservations(obsCsv), [
+  { date: '01/08/2026', label: 'DW7B', columnIndex: 1, value: '29,7', observation: 'obs B' },
+  { date: '01/08/2026', label: 'DW7A', columnIndex: 3, value: '167,3', observation: 'obs A' }
+]);
+
+const notesOnlyCsv = [
+  'DATA,POÇO 1,Observações,DATA,POÇO 2,OBS',
+  '01/08/2026,,Sem leitura,02/08/2026,12,"<alerta>, revisar"'
+].join('\n');
+const notesOnly = extractObservations(notesOnlyCsv);
+assert.deepStrictEqual(notesOnly.map(note => [note.date, note.value, note.observation]), [
+  ['01/08/2026', '', 'Sem leitura'],
+  ['02/08/2026', '12', '<alerta>, revisar']
+]);
+const notesOnlyExtra = extractExtraColumns(notesOnlyCsv);
+assert.strictEqual(notesOnlyExtra.rows[0].values[`${notesOnlyExtra.columns[0].key}__obs`], 'Sem leitura');
+assert.ok(renderObservationsHtml(notesOnly, true).includes('&lt;alerta&gt;, revisar'));
 
 const multilineHeaderCsv = [
   'DATA,"CONSUMO GÁS NATURAL',
@@ -125,9 +144,11 @@ assert.deepStrictEqual(
   { b07: '1.25 ppm', b12: '--', b14: '2.00 ppm' }
 );
 const chlorineSeries = extractChlorineSeries([
-  'DATA,"B07 TESTE DE CLORO","B12 TESTE DE CLORO","B14 TESTE DE CLORO"',
-  '23/10/2026,"1,25","1,50","2,00"'
+  'DATA,"B07 TESTE DE CLORO",RETESTE,Observação,"B12 TESTE DE CLORO","B14 TESTE DE CLORO"',
+  '23/10/2026,"1,25","1,30",reteste,"1,50","2,00"'
 ].join('\n'));
+assert.strictEqual(chlorineSeries[0].columnIndex, 1);
+assert.strictEqual(chlorineSeries[0].retesteIndex, 2);
 assert.deepStrictEqual(getDailyChlorineValues(chlorineSeries, 0), {
   b07: '1.25 ppm',
   b12: '1.50 ppm',

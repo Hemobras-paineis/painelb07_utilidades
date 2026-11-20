@@ -68,6 +68,46 @@ function normalizeCsvHeader(value) {
         .toLowerCase();
 }
 
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+const isObservationHeader = (header) => /^(obs\w*|ob[a-z]*(cao|coes))\d*$/.test(header);
+
+function extractObservations(csvText) {
+    const records = splitCsvRecords(csvText);
+    if (records.length < 2) return [];
+    const labels = splitCsvLine(records[0]);
+    const headers = labels.map(normalizeCsvHeader);
+    const observations = [];
+    headers.forEach((header, index) => {
+        if (!index || !isObservationHeader(header)) return;
+        const dateIndex = headers.reduce((found, item, i) => i < index && /^(data|date|dia|datas)$/.test(item) ? i : found, -1);
+        if (dateIndex < 0) return;
+        records.slice(1).forEach((record) => {
+            const values = splitCsvLine(record);
+            const date = (values[dateIndex] || '').trim();
+            const observation = (values[index] || '').trim();
+            if (date && observation) {
+                observations.push({
+                    date,
+                    label: labels[index - 1].replace(/\s+/g, ' ').trim(),
+                    columnIndex: index - 1,
+                    value: (values[index - 1] || '').trim(),
+                    observation
+                });
+            }
+        });
+    });
+    return observations.sort((a, b) => normalizeDateValue(a.date).localeCompare(normalizeDateValue(b.date)));
+}
+
+function renderObservationsHtml(observations, report = false) {
+    if (!observations.length) return '';
+    const tableClass = report ? 'report-table' : 'observation-table';
+    const title = report ? '<h3 class="report-section-title">Observações</h3>' : '<strong>Observações</strong>';
+    return `${title}<table class="${tableClass}"><thead><tr><th>Data</th><th>Módulo</th><th>Valor</th><th>Observação</th></tr></thead><tbody>${observations.map(item =>
+        `<tr><td>${escapeHtml(item.date)}</td><td>${escapeHtml(item.label)}</td><td>${escapeHtml(item.value) || '-'}</td><td class="report-obs">${escapeHtml(item.observation)}</td></tr>`
+    ).join('')}</tbody></table>`;
+}
+
 function splitCsvLine(line) {
     const delimiter = line.includes(';') && !line.includes(',') ? ';' : ',';
     const values = [];
@@ -210,6 +250,8 @@ function extractChlorineSeries(csvText) {
         const hasReteste = (norm[index + 1] || '').startsWith('reteste');
         series.push({
             name: cells[index].replace(/\s+/g, ' ').trim(),
+            columnIndex: index,
+            retesteIndex: hasReteste ? index + 1 : -1,
             retesteName: hasReteste ? cells[index + 1].replace(/\s+/g, ' ').trim() : '',
             values: dataRows.map((row) => toNumber(row[index])),
             reteste: hasReteste ? dataRows.map((row) => toNumber(row[index + 1])) : dataRows.map(() => null)
@@ -381,7 +423,6 @@ function extractExtraColumns(csvText) {
     if (!dateIndexes.length) return { columns: [], rows: [] };
 
     const extras = [];
-    const isObservationHeader = (header) => /^(obs\w*|ob[a-z]*(cao|coes))\d*$/.test(header);
     norm.forEach((header, index) => {
         if (!header || dateIndexes.includes(index)) return;
         // Observações nunca viram módulo: ficam vinculadas à coluna imediatamente à esquerda.
@@ -405,19 +446,21 @@ function extractExtraColumns(csvText) {
         parsedLines.forEach((values) => {
             const date = (values[col.dateIndex] || '').trim();
             const raw = (values[col.index] || '').trim();
-            if (!date || !raw) return;
-            filledCount += 1;
-            if (/^-?[\d.,]+/.test(raw) && Number.isFinite(parseNumberValue(raw))) numericCount += 1;
-            if (!byDate.has(date)) byDate.set(date, {});
-            byDate.get(date)[col.key] = raw;
             const obs = col.obsIndex >= 0 ? (values[col.obsIndex] || '').trim() : '';
+            if (!date || (!raw && !obs)) return;
+            if (raw) {
+                filledCount += 1;
+                if (/^-?[\d.,]+/.test(raw) && Number.isFinite(parseNumberValue(raw))) numericCount += 1;
+            }
+            if (!byDate.has(date)) byDate.set(date, {});
+            if (raw) byDate.get(date)[col.key] = raw;
             if (obs) byDate.get(date)[`${col.key}__obs`] = obs;
         });
         col.numeric = filledCount > 0 && numericCount === filledCount;
-        col.hasObs = col.obsIndex >= 0 && parsedLines.some(values => (values[col.dateIndex] || '').trim() && (values[col.index] || '').trim() && (values[col.obsIndex] || '').trim());
+        col.hasObs = col.obsIndex >= 0;
     });
 
-    const columns = extras.filter(col => parsedLines.some(values => (values[col.index] || '').trim()));
+    const columns = extras.filter(col => parsedLines.some(values => (values[col.index] || '').trim() || (col.obsIndex >= 0 && (values[col.obsIndex] || '').trim())));
     const rows = [...byDate.entries()]
         .map(([date, values]) => ({ date, values }))
         .sort((a, b) => normalizeDateValue(a.date).localeCompare(normalizeDateValue(b.date)));
@@ -641,6 +684,7 @@ setTimeout(() => window.dispatchEvent(new Event('resize')), 450);
     // --- MODO TV (Animação Apenas Gráficos, Sidebar Oculta) ---
     let isTvModeActive = false;
     let tvIntervalId = null;
+    let tvScrollFrame = null;
     let currentViewIndex = 0;
     // Views que contém os gráficos
     const tvViews = [
@@ -682,14 +726,14 @@ const getExtraIcon = (col) => {
 };
 let tvModeKind = 'standard';
 const getTvViews = () => {
-   const numeric = extraData.columns.filter(col => col.numeric);
+   const columns = extraData.columns;
    if (tvModeKind === 'full') {
       const hasWellConsumption = extraData.columns.some((col) => /pocos?/.test(normalizeCsvHeader(col.label)));
       const dashboardViews = hasWellConsumption ? [{ id: 'view-dashboard', title: 'Consumo dos Poços' }] : [];
-      return [...tvViews, ...dashboardViews, ...numeric.map(col => ({ id: getExtraViewId(col), title: col.label }))];
+      return [...tvViews, ...dashboardViews, ...columns.map(col => ({ id: getExtraViewId(col), title: col.label }))];
    }
    const views = [...tvViews];
-   if (numeric.some(isGnB07Column)) views.push({ id: 'view-gn-b07', title: 'Consumo de GN - B07 (Caldeiras 02 e 03)' });
+   if (columns.some(isGnB07Column)) views.push({ id: 'view-gn-b07', title: 'Consumo de GN - B07 (Caldeiras 02 e 03)' });
    return views;
 };
     const TIME_PER_SLIDE = 20000;
@@ -781,6 +825,7 @@ document.addEventListener('keydown', (event) => {
 const firstView = getTvViews()[0];
 openView(firstView.id, firstView.title);
 animateTvProgress();
+animateTvObservations();
 setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
 
 tvIntervalId = setInterval(() => {
@@ -788,15 +833,30 @@ const views = getTvViews();
 currentViewIndex = (currentViewIndex + 1) % views.length;
 openView(views[currentViewIndex].id, views[currentViewIndex].title);
             animateTvProgress();
+            animateTvObservations();
             setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
         }, TIME_PER_SLIDE);
     }
 
     function stopTvCarousel() {
         clearInterval(tvIntervalId);
+        cancelAnimationFrame(tvScrollFrame);
         progressBar.style.transition = 'none';
         progressBar.style.width = '0%';
     }
+
+    function animateTvObservations() {
+        cancelAnimationFrame(tvScrollFrame);
+        const containers = [...document.querySelectorAll('.view-section.active .chart-observations:not(:empty), .view-section.active .extra-text-tv-table .table-responsive')];
+        containers.forEach(container => { container.scrollTop = 0; });
+        const start = performance.now();
+        const scroll = (now) => {
+            const progress = Math.max(0, Math.min(1, (now - start - 1000) / (TIME_PER_SLIDE - 2000)));
+            containers.forEach(container => { container.scrollTop = (container.scrollHeight - container.clientHeight) * progress; });
+            if (progress < 1 && isTvModeActive) tvScrollFrame = requestAnimationFrame(scroll);
+        };
+        tvScrollFrame = requestAnimationFrame(scroll);
+    }
 
     // --- RENDENRIZAÇÃO DE DADOS (GRÁFICOS E TABELAS) ---
     const defaultData = {
@@ -813,7 +873,6 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
     let diasAgosto = [...baseDataState.diasAgosto];
     let dw7A = [...baseDataState.dw7A];
     let dw7B = [...baseDataState.dw7B];
-    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
     const dwRowHtml = (dia, i) => `<tr><td><strong>${String(dia).split('/').length > 2 ? dia : dia + '/2026'}</strong></td><td>${dw7A[i].toFixed(1)}</td><td>${dw7B[i].toFixed(1)}</td></tr>`;
     let nitrogenNivel = [...baseDataState.nitrogenNivel];
     let cloroPpm = [...baseDataState.cloroPpm];
@@ -958,6 +1017,23 @@ openView(views[currentViewIndex].id, views[currentViewIndex].title);
         (s.reteste[i] !== null && s.reteste[i] !== undefined)
     );
     let extraData = { columns: [], rows: [] };
+    let observations = [];
+    const observationsFor = (start, end, predicate) => {
+        const matching = observations.filter(predicate);
+        return filterDateRange(matching.map(item => item.date), start, end).indexes.map(index => matching[index]);
+    };
+    const isBaseObservation = (item, module) => {
+        const header = normalizeCsvHeader(item.label);
+        if (module === 'dw7a') return /^(dw7a|dwa)/.test(header);
+        if (module === 'dw7b') return /^(dw7b|dwb|dw7$)/.test(header);
+        if (module === 'nitrogenio') return /^(nitrogenio|n2|reabastecimento|refill|reposicao)/.test(header);
+        if (module === 'cloro') return /^(testedecloro|testecloro|cloro|b(?:07|12|14).*cloro|reteste)/.test(header);
+        return false;
+    };
+    const isSelectedChlorineObservation = (item, indexes) => indexes.some(index => {
+        const serie = getChlorineSeries()[index];
+        return item.columnIndex === serie.columnIndex || item.columnIndex === serie.retesteIndex;
+    });
     const extraCharts = [];
     const dashboardBoilerCharts = [];
     let nitroData = [{d: '05/08/2026', n: '116,3', r: '280,2 pol'}, {d: '26/08/2026', n: '218,9', r: 'pol'}];
@@ -1085,6 +1161,7 @@ function syncAvailabilityForDate(referenceDate) {
                 cloroSeries = parsed.cloroSeries || [];
                 nitroData = [...parsed.nitroData];
                 extraData = extractExtraColumns(csvText);
+                observations = extractObservations(csvText);
 
 const downtimeFromSource = await findDowntime(csvText, url);
 if (downtimeFromSource.length) {
@@ -1116,6 +1193,7 @@ return true;
     retestePpm = [...defaultData.retestePpm];
     cloroSeries = [];
         extraData = { columns: [], rows: [] };
+        observations = [];
                 syncAvailabilityForDate(document.getElementById('dateEnd')?.value);
                 renderAvailabilityView();
         updateDataSourceStatus('Google Sheets indisponível; exibindo dados locais temporariamente');
@@ -1331,13 +1409,14 @@ function renderExtraColumnsView() {
             reportSelect.querySelector('.multi-select-menu').appendChild(option);
         }
 
-        const visibleRows = filtered.indexes.map(index => rows[index]).filter(row => row.values[col.key] !== undefined);
+        const visibleRows = filtered.indexes.map(index => rows[index]).filter(row => row.values[col.key] !== undefined || row.values[`${col.key}__obs`] !== undefined);
+        const columnObservations = observationsFor(dateStart, dateEnd, item => item.columnIndex === col.index);
         const view = document.createElement('div');
         view.id = viewId;
         view.className = 'view-section';
         view.innerHTML = `<div class="module-container">
-            ${col.numeric ? `<div class="chart-card tv-chart"><h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper"><canvas></canvas></div></div>` : ''}
-            <section class="reference-section tv-hide"><div class="table-card">
+            ${col.numeric ? `<div class="chart-card tv-chart"><h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper"><canvas></canvas></div><div class="chart-observations tv-observations-only">${renderObservationsHtml(columnObservations)}</div></div>` : ''}
+            <section class="reference-section ${col.numeric ? 'tv-hide' : 'extra-text-tv-table'}"><div class="table-card">
                 <div class="table-header-custom">${getExtraIconHtml(col)} <h3>${escapeHtml(col.label)}</h3></div>
                 <div class="table-responsive"><table>
                     <thead><tr><th>Data</th><th>${escapeHtml(col.label)}</th>${col.hasObs ? '<th>Observação</th>' : ''}</tr></thead>
@@ -1354,12 +1433,13 @@ function renderExtraColumnsView() {
         const isGas = /gas ?natural/.test(normalizeCsvHeader(col.label).replace(/[^a-z ]/g, ' ')) || /gasnatural/.test(normalizeCsvHeader(col.label));
         if (canvas && typeof Chart !== 'undefined') {
             const color = palette[i % palette.length];
-            const numbers = visibleRows.map(row => parseNumberValue(row.values[col.key]));
+            const chartRows = visibleRows.filter(row => row.values[col.key] !== undefined);
+            const numbers = chartRows.map(row => parseNumberValue(row.values[col.key]));
             if (isGas) canvas.closest('.chart-wrapper').style.minHeight = '520px';
             extraCharts.push({ key: col.key, chart: new Chart(canvas, {
                 type: 'line',
                 data: {
-                    labels: visibleRows.map(row => row.date),
+                    labels: chartRows.map(row => row.date),
                     datasets: [{
                         label: col.label,
                         data: numbers,
@@ -1387,7 +1467,7 @@ function renderExtraColumnsView() {
                             align: 'top',
                             offset: 6,
                             formatter: (value, context) => formatChartValueWithUnit(
-                                visibleRows[context.dataIndex]?.values[col.key],
+                                chartRows[context.dataIndex]?.values[col.key],
                                 col.unit
                             )
                         }
@@ -1502,7 +1582,7 @@ function renderExtraColumnsView() {
         const gnView = document.createElement('div');
         gnView.id = 'view-gn-b07';
         gnView.className = 'view-section';
-        gnView.innerHTML = '<div class="module-container gn-b07-grid">' + gnColumns.map(col => `<div class="chart-card tv-chart"><h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper"><canvas data-key="${escapeHtml(col.key)}"></canvas></div></div>`).join('') + '</div>';
+        gnView.innerHTML = '<div class="module-container gn-b07-grid">' + gnColumns.map(col => `<div class="chart-card tv-chart"><h3>${escapeHtml(col.label)}</h3><div class="chart-wrapper"><canvas data-key="${escapeHtml(col.key)}"></canvas></div><div class="chart-observations">${renderObservationsHtml(observationsFor(dateStart, dateEnd, item => item.columnIndex === col.index))}</div></div>`).join('') + '</div>';
         container.appendChild(gnView);
         gnColumns.forEach((col) => {
             const color = palette[columns.indexOf(col) % palette.length];
@@ -1903,6 +1983,17 @@ const cloroIndexes = indexes.filter(hasCloroData);
 syncAvailabilityForDate(dateEnd.value || (diasAgosto.length ? diasAgosto[diasAgosto.length - 1] : ''));
 renderAvailabilityView();
 renderExtraColumnsView();
+[
+    ['dwObservations', ['dw7a', 'dw7b']],
+    ['nitrogenObservations', ['nitrogenio']],
+    ['chlorineObservations', ['cloro']]
+].forEach(([id, modules]) => {
+    const container = document.getElementById(id);
+    const chlorineIndexes = selectedChlorineIndexes(getSelectedReportModules()).filter(index =>
+        !isTvModeActive || tvModeKind === 'full' || normalizeCsvHeader(getChlorineSeries()[index].name).includes('b07'));
+    if (container) container.innerHTML = renderObservationsHtml(observationsFor(dateStart.value, dateEnd.value, item =>
+        modules.some(module => isBaseObservation(item, module) && (module !== 'cloro' || isSelectedChlorineObservation(item, chlorineIndexes)))));
+});
 
 const blockDw7A = dwIndexes.map((index) => dw7A[index]);
 const blockDw7B = dwIndexes.map((index) => dw7B[index]);
@@ -2119,7 +2210,7 @@ const extraReportHtml = (() => {
     return columns.map((col) => [
         '<h3 class="report-section-title">' + escapeHtml(col.label) + '</h3>',
         '<table class="report-table"><thead><tr><th>Data</th><th>' + escapeHtml(col.label) + '</th>' + (col.hasObs ? '<th>Observação</th>' : '') + '</tr></thead><tbody>',
-        inRange.filter((row) => row.values[col.key] !== undefined).map((row) => '<tr><td>' + escapeHtml(row.date) + '</td><td>' + escapeHtml(row.values[col.key]) + '</td>' + (col.hasObs ? '<td class="report-obs">' + (escapeHtml(row.values[col.key + '__obs']) || '-') + '</td>' : '') + '</tr>').join(''),
+        inRange.filter((row) => row.values[col.key] !== undefined || row.values[col.key + '__obs'] !== undefined).map((row) => '<tr><td>' + escapeHtml(row.date) + '</td><td>' + (escapeHtml(row.values[col.key]) || '-') + '</td>' + (col.hasObs ? '<td class="report-obs">' + (escapeHtml(row.values[col.key + '__obs']) || '-') + '</td>' : '') + '</tr>').join(''),
         '</tbody></table>'
     ].join(''));
 })();
@@ -2365,6 +2456,11 @@ const allSummaryHtml = [
 const summaryHtml = '<h3 class="report-section-title">Resumo Operacional</h3><div class="report-summary-grid">' +
     (isAllModules ? allSummaryHtml : reportModules.map((key) => (summaryItemsByModule[key] || []).join('')).join('')) +
     '</div>';
+const baseModules = ['dw7a', 'dw7b', 'nitrogenio', 'cloro'];
+const baseObservationsHtml = (modules) => renderObservationsHtml(
+    observationsFor(startDate, endDate, item => modules.some(module =>
+        isBaseObservation(item, module) && (module !== 'cloro' || isSelectedChlorineObservation(item, chlorineSelected)))), true
+);
 
 const allDetailsHtml = [
     '<h3 class="report-section-title">Disponibilidade das Utilidades em ' + formatReportDate(endDate) + '</h3>',
@@ -2383,6 +2479,7 @@ const allDetailsHtml = [
     '<thead><tr><th style="border:1px solid #ddd; padding:8px; text-align:left;">Data</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7A</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">DW 7B</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Nitrogênio</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Cloro</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Reteste</th></tr></thead>',
     '<tbody>' + rowsHtml + '</tbody>',
     '</table>',
+    baseObservationsHtml(baseModules),
     extraReportHtml.join('') + wellTotalReportHtml
 ].join('');
 const moduleDetailsHtml = {
@@ -2436,6 +2533,7 @@ const moduleDetailsHtml = {
 extraData.columns.forEach((col, index) => {
     moduleDetailsHtml['extra:' + col.key] = extraReportHtml[index];
 });
+baseModules.forEach((key) => { moduleDetailsHtml[key] += baseObservationsHtml([key]); });
 const detailsHtml = isAllModules ? allDetailsHtml : reportModules.map((key) => moduleDetailsHtml[key] || '').join('');
 
 const reportContent = [
@@ -2488,6 +2586,8 @@ normalizeDateValue,
 extractChlorineSeries,
         buildDataStateFromCsv,
         extractExtraColumns,
+        extractObservations,
+        renderObservationsHtml,
         extractColumnUnit,
         formatChartValueWithUnit,
         getDailyBoilerConsumption,

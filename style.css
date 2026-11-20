@@ -104,6 +104,17 @@ body.sidebar-collapsed .sidebar-nav li.active a { border-left-width: 3px; }
 .chart-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); display: flex; flex-direction: column; }
 .chart-card h3 { font-size: 16px; color: #34495e; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ecf0f1; text-align: center; }
 .chart-wrapper { position: relative; height: 280px; width: 100%; flex: 1; }
+.chart-observations:not(:empty) { margin-top: 12px; max-height: 220px; overflow: auto; }
+.chart-observations strong { color: #6d1530; }
+.observation-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.observation-table th, .observation-table td { padding: 6px 8px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; }
+.tv-observations-only { display: none; }
+.tv-mode-active .tv-observations-only { display: block; }
+.tv-mode-active .chart-card:has(.chart-observations:not(:empty)) .chart-wrapper { height: 38vh !important; min-height: 0; }
+.tv-mode-active .chart-observations:not(:empty) { max-height: 22vh; flex: 0 1 auto; }
+.tv-mode-active .gn-b07-grid .chart-card:has(.chart-observations:not(:empty)) .chart-wrapper { height: auto !important; }
+.tv-mode-active #view-nitrogenio .chart-card:has(.chart-observations:not(:empty)) .chart-wrapper { height: auto !important; }
+.tv-mode-active .extra-text-tv-table { min-height: 0; max-height: 100%; }
 .chart-wrapper.small-chart { height: 260px; } /* Gráficos menores no Dashboard Geral */
 .gn-b07-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); align-content: start; }
 .tv-mode-active .gn-b07-grid { height: calc(100vh - 80px); padding: 16px 24px; gap: 16px; align-content: stretch; }

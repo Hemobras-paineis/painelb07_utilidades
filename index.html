@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel de Controle de Utilidades - Hemobrás</title>
-    <link rel="stylesheet" href="style.css?v=painel-atualizado">
+    <link rel="stylesheet" href="style.css?v=observacoes-modulos">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -252,6 +252,7 @@
                     <div class="chart-card tv-chart">
                         <h3>Consumo Diário de DW (7A vs 7B) - m³</h3>
                         <div class="chart-wrapper"><canvas id="dwChartTv"></canvas></div>
+                        <div id="dwObservations" class="chart-observations"></div>
                     </div>
                     <section class="reference-section tv-hide">
                         <div class="table-card">
@@ -276,6 +277,7 @@
                     <div class="chart-card tv-chart">
                         <h3>Acompanhamento de Nível de Nitrogênio</h3>
                         <div class="chart-wrapper"><canvas id="nitrogenChartTv"></canvas></div>
+                        <div id="nitrogenObservations" class="chart-observations"></div>
                     </div>
                     <section class="reference-section nitrogenio-tv-table">
                         <div class="table-card">
@@ -318,6 +320,7 @@
                     <div class="chart-card tv-chart">
                         <h3>Monitoramento de Cloro (ppm) vs Limites de Controle</h3>
                         <div id="chlorineBlocksTv" class="chlorine-blocks chlorine-blocks-tv"></div>
+                        <div id="chlorineObservations" class="chart-observations"></div>
                     </div>
                     <section class="reference-section tv-hide">
                         <div class="table-card">
@@ -336,6 +339,6 @@
         </main>
     </div>
 
-    <script src="script.js?v=google-sheets-principal"></script>
+    <script src="script.js?v=observacoes-modulos"></script>
 </body>
 </html>
